@@ -1,0 +1,3 @@
+rembg[gpu]
+PySide6
+pillow
