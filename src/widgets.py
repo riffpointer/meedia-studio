@@ -1,6 +1,6 @@
 import os
 from PySide6.QtCore import (
-    Qt, QSize, Signal, QPoint, QUrl, QMimeData, QByteArray,
+    Qt, QSize, Signal, QPoint, QUrl, QMimeData, QByteArray, QEvent,
     QTimer, QPropertyAnimation, QEasingCurve, QRectF
 )
 from PySide6.QtGui import (
@@ -8,16 +8,48 @@ from PySide6.QtGui import (
     QPen, QConicalGradient
 )
 from PySide6.QtWidgets import (
+    QProxyStyle,
+    QStyle,
+    QStyleOptionTab,
+    QStyleOptionButton,
     QFrame, QVBoxLayout, QHBoxLayout, QCheckBox, QLabel, QWidget,
     QGraphicsDropShadowEffect, QMenu, QApplication, QTabBar, QStyle,
-    QStyleOptionTab, QStylePainter, QScrollArea, QGraphicsOpacityEffect
+    QStyleOptionTab, QStylePainter, QScrollArea, QGraphicsOpacityEffect, QPushButton
 )
 from PySide6.QtSvg import QSvgRenderer
+
+class LeftAlignTabProxy(QProxyStyle):
+    def __init__(self, style=None):
+        super().__init__(style)
+        self._is_tab_label = False
+
+    def drawControl(self, element, option, painter, widget=None):
+        if element == QStyle.CE_TabBarTabLabel:
+            self._is_tab_label = True
+            super().drawControl(element, option, painter, widget)
+            self._is_tab_label = False
+        elif element == QStyle.CE_PushButtonLabel:
+            if hasattr(option, 'icon') and not option.icon.isNull() and option.text:
+                if not option.text.startswith("  "):
+                    option.text = "  " + option.text.lstrip()
+            super().drawControl(element, option, painter, widget)
+        else:
+            super().drawControl(element, option, painter, widget)
+
+    def drawItemText(self, painter, rect, flags, pal, enabled, text, textRole):
+        if self._is_tab_label:
+            from PySide6.QtCore import Qt
+            flags = (flags & ~Qt.AlignCenter) | Qt.AlignLeft | Qt.AlignVCenter
+            rect.setLeft(rect.left() + 5)
+        super().drawItemText(painter, rect, flags, pal, enabled, text, textRole)
 
 class DragTabBar(QTabBar):
     def __init__(self, parent=None):
         super().__init__(parent)
+        from PySide6.QtCore import Qt
+        self.setCursor(Qt.PointingHandCursor)
         self.setMouseTracking(True)
+        self.setStyle(LeftAlignTabProxy(self.style()))
 
     def tabSizeHint(self, index):
         return QSize(160, 42)
@@ -45,7 +77,7 @@ class DragTabBar(QTabBar):
 class DroppableScrollArea(QScrollArea):
     files_dropped = Signal(list)  # Emits list of valid image file paths
     
-    VALID_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.webp', '.svg'}
+    VALID_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.webp', '.svg', '.mp4', '.webm', '.avi', '.mov', '.mkv', '.gif'}
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -340,7 +372,7 @@ class TransparentImageLabel(QLabel):
         
     def paintEvent(self, event):
         painter = QPainter(self)
-        # 1. Paint the checkerboard background
+        painter.setBrushOrigin(-self.pos())
         painter.fillRect(self.rect(), self.checkerboard_brush)
         
         # 2. Paint the centered, aspect-ratio preserved pixmap
@@ -557,37 +589,42 @@ class CardSpinner(QWidget):
             scrim = QColor(5, 46, 22, 180)
         else:
             scrim = QColor(60, 10, 10, 180)
-        painter.fillRect(0, 0, w, h, scrim)
-
-        cx, cy = w / 2, h / 2
-        r = min(w, h) * 0.30   # ring radius
-        pen_w = max(3.0, r * 0.18)
+            
+        path = QPainterPath()
+        path.addRoundedRect(0, 0, w, h, 10, 10)
+        painter.fillPath(path, QBrush(scrim))
 
         if self._state == 'processing':
-            # ── Spinning arc ───────────────────────────────────────────────
-            # Track (dim)
-            pen = QPen(QColor(99, 102, 241, 50), pen_w, Qt.SolidLine, Qt.RoundCap)
-            painter.setPen(pen)
-            rect = QRectF(cx - r, cy - r, r * 2, r * 2)
-            painter.drawEllipse(rect)
-
-            # Bright arc
-            pen.setColor(QColor(129, 140, 248, 230))
-            painter.setPen(pen)
-            start = int((90 - self._angle) * 16)
-            span  = -int(self._ARC_SWEEP * 16)
-            painter.drawArc(rect, start, span)
-
-            # ── "Processing" label ─────────────────────────────────────────
+            # ── Indeterminate progress bar at the bottom ──────────────────
+            bar_height = 4
+            # We place it at the very bottom with a small margin
+            bar_y = h - bar_height - 6
+            
+            # Background track
+            painter.fillRect(10, bar_y, w - 20, bar_height, QColor(99, 102, 241, 50))
+            
+            # Moving chunk
+            chunk_width = int(w * 0.3)
+            
+            import math
+            rad = math.radians(self._angle)
+            progress = (math.sin(rad) + 1) / 2
+            
+            chunk_x = 10 + int(progress * (w - 20 - chunk_width))
+            painter.fillRect(chunk_x, bar_y, chunk_width, bar_height, QColor(129, 140, 248, 230))
+            
+            # ── "Processing" label in center ────────────────────────────────
             painter.setPen(QColor(199, 210, 254, 200))
             font = painter.font()
-            font.setPointSize(7)
+            font.setPointSize(9)
             font.setBold(True)
             painter.setFont(font)
-            painter.drawText(0, int(cy + r + pen_w + 6), w, 16,
-                             Qt.AlignHCenter, "Processing…")
+            painter.drawText(0, 0, w, h, Qt.AlignCenter, "Processing...")
 
         elif self._state == 'done':
+            cx, cy = w / 2, h / 2
+            r = min(w, h) * 0.15
+            pen_w = max(3.0, r * 0.18)
             # ── Green circle + checkmark ───────────────────────────────────
             pen = QPen(QColor(52, 211, 153), pen_w, Qt.SolidLine, Qt.RoundCap)
             painter.setPen(pen)
@@ -607,6 +644,9 @@ class CardSpinner(QWidget):
             )
 
         else:  # error
+            cx, cy = w / 2, h / 2
+            r = min(w, h) * 0.15
+            pen_w = max(3.0, r * 0.18)
             # ── Red circle + X ─────────────────────────────────────────────
             pen = QPen(QColor(248, 113, 113), pen_w, Qt.SolidLine, Qt.RoundCap)
             painter.setPen(pen)
@@ -650,6 +690,24 @@ class ImageCard(QFrame):
         self.img_label.setStyleSheet("background-color: transparent; border-radius: 6px;")
         
         pixmap = QPixmap(file_path)
+        if pixmap.isNull():
+            # Try to extract thumbnail for videos via OpenCV
+            try:
+                import cv2
+                from src.utils import pil_to_qimage
+                from PIL import Image
+                cap = cv2.VideoCapture(file_path)
+                if cap.isOpened():
+                    ret, frame = cap.read()
+                    if ret:
+                        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                        pil_img = Image.fromarray(frame_rgb)
+                        q_img = pil_to_qimage(pil_img)
+                        pixmap = QPixmap.fromImage(q_img)
+                    cap.release()
+            except Exception:
+                pass
+
         if not pixmap.isNull():
             scaled_pixmap = pixmap.scaled(140, 110, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             self.img_label.setPixmap(scaled_pixmap)
@@ -725,10 +783,10 @@ class ImageCard(QFrame):
         """Show or hide the animated spinner overlay over the thumbnail."""
         if active:
             if self._spinner is None or not self._spinner.isVisible():
-                self._spinner = CardSpinner(self.img_label)
+                self._spinner = CardSpinner(self)
             self._spinner.setGeometry(0, 0,
-                                      self.img_label.width(),
-                                      self.img_label.height())
+                                      self.width(),
+                                      self.height())
             self._spinner._state = 'processing'
             self._spinner._opacity_fx.setOpacity(1.0)
             self._spinner._timer.start()
@@ -741,17 +799,15 @@ class ImageCard(QFrame):
     def set_error(self):
         """Flash a red-X overlay to indicate this card failed processing."""
         if self._spinner is None or not self._spinner.isVisible():
-            self._spinner = CardSpinner(self.img_label)
+            self._spinner = CardSpinner(self)
             self._spinner.setGeometry(0, 0,
-                                      self.img_label.width(),
-                                      self.img_label.height())
+                                      self.width(),
+                                      self.height())
         self._spinner._opacity_fx.setOpacity(1.0)
         self._spinner.mark_error()
 
     def showEvent(self, event):
         super().showEvent(event)
-        alpha = self.get_shadow_alpha()
-        self.shadow.setColor(QColor(0, 0, 0, alpha))
         
     def on_checkbox_changed(self, state):
         self.selection_changed.emit(state == Qt.Checked)
@@ -767,14 +823,11 @@ class ImageCard(QFrame):
             return main_win.has_active_selections_vectorizer()
         elif card_type == 'rest' and hasattr(main_win, 'has_active_selections_restoration'):
             return main_win.has_active_selections_restoration()
+        elif card_type == 'vid' and hasattr(main_win, 'has_active_selections_vid'):
+            return main_win.has_active_selections_vid()
         return False
         
     def enterEvent(self, event):
-        alpha = self.get_shadow_alpha()
-        glow_color = QColor(79, 70, 229, 65) if alpha == 25 else QColor(99, 102, 241, 100)
-        self.shadow.setColor(glow_color)
-        self.shadow.setBlurRadius(12)
-
         main_win = self.window()
         if hasattr(main_win, 'set_status'):
             main_win.set_status(f"Location: {self.file_path}")
@@ -783,10 +836,6 @@ class ImageCard(QFrame):
         super().enterEvent(event)
 
     def leaveEvent(self, event):
-        alpha = self.get_shadow_alpha()
-        self.shadow.setColor(QColor(0, 0, 0, alpha))
-        self.shadow.setBlurRadius(8)
-
         main_win = self.window()
         if hasattr(main_win, 'set_status'):
             main_win.set_status("Ready. Select checkbox to batch process, or click card directly.")
@@ -1003,6 +1052,221 @@ class RegionSelectLabel(QLabel):
                 orig_w = int(rw / scale)
                 orig_h = int(rh / scale)
                 
+        return self._img_dims
+
+    def _show_info_badge(self):
+        """Create (if needed) and fade-in the info badge over the thumbnail."""
+        # Skip if there's an active processing spinner
+        if self._spinner and self._spinner.isVisible():
+            return
+
+        w_px, h_px = self._read_dims()
+        if w_px == 0 and h_px == 0:
+            return   # can't load image — don't show badge
+
+        if self._info_badge is None:
+            badge_h = 42
+            badge_w = self.img_label.width()
+            self._info_badge = CardInfoBadge(
+                self.img_label, w_px, h_px, self._size_kb
+            )
+            self._info_badge.setGeometry(
+                0,
+                self.img_label.height() - badge_h,
+                badge_w,
+                badge_h
+            )
+
+        self._info_badge.fade_in()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.drag_start_position = event.pos()
+        super().mousePressEvent(event)
+        
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            # Check drag distance threshold to distinguish click from drag
+            if (event.pos() - self.drag_start_position).manhattanLength() < QApplication.startDragDistance():
+                if self.parent_window_has_selections():
+                    self.checkbox.setChecked(not self.checkbox.isChecked())
+                else:
+                    self.clicked.emit(self.file_path)
+        super().mouseReleaseEvent(event)
+        
+    def mouseMoveEvent(self, event):
+        if not (event.buttons() & Qt.LeftButton):
+            return
+        # Check drag distance threshold to prevent accidental drags on quick clicks
+        if (event.pos() - self.drag_start_position).manhattanLength() < QApplication.startDragDistance():
+            return
+            
+        drag = QDrag(self)
+        mime_data = QMimeData()
+        mime_data.setUrls([QUrl.fromLocalFile(self.file_path)])
+        drag.setMimeData(mime_data)
+        
+        pixmap = self.img_label.pixmap()
+        if pixmap and not pixmap.isNull():
+            drag.setPixmap(pixmap.scaled(70, 70, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            drag.setHotSpot(QPoint(35, 35))
+            
+        drag.exec(Qt.CopyAction)
+        
+    def show_context_menu(self, position):
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #1a1a20;
+                color: #e2e8f0;
+                border: 1px solid #374151;
+                border-radius: 6px;
+                padding: 4px;
+            }
+            QMenu::item {
+                padding: 6px 20px;
+                border-radius: 4px;
+            }
+            QMenu::item:selected {
+                background-color: #6366f1;
+                color: #ffffff;
+            }
+            QMenu::separator {
+                height: 1px;
+                background-color: #2d2d39;
+                margin: 4px 0px;
+            }
+        """)
+        
+        act_rename = menu.addAction("Rename")
+        act_copy = menu.addAction("Copy")
+        act_paste = menu.addAction("Paste")
+        
+        # Enable Paste only if clipboard has files
+        clipboard = QApplication.clipboard()
+        mime_data = clipboard.mimeData()
+        if not mime_data.hasUrls():
+            act_paste.setEnabled(False)
+            
+        act_delete = menu.addAction("Delete")
+        menu.addSeparator()
+        act_explorer = menu.addAction("Show in Explorer")
+        
+        action = menu.exec(self.mapToGlobal(position))
+        
+        main_win = self.window()
+        if not hasattr(main_win, 'rename_file'):
+            return
+            
+        if action == act_rename:
+            main_win.rename_file(self.file_path)
+        elif action == act_copy:
+            main_win.copy_file(self.file_path)
+        elif action == act_paste:
+            main_win.paste_file()
+        elif action == act_delete:
+            main_win.delete_file(self.file_path)
+        elif action == act_explorer:
+            main_win.show_in_explorer(self.file_path)
+
+
+# Interactive Region Selection label for Denoise/Deblur
+from PySide6.QtGui import QPen, QColor, QBrush
+from PySide6.QtCore import QRect
+
+class RegionSelectLabel(QLabel):
+    region_selected = Signal(QRect) # Emits the raw pixel QRect of the original image
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAlignment(Qt.AlignCenter)
+        self.setMouseTracking(True)
+        self.start_pos = None
+        self.current_pos = None
+        self.selection_rect = None # QRect in label coordinates
+        self.base_pixmap = None
+        self.zoom_factor = 1.0
+        self.setFixedSize(400, 360)
+        
+    def set_zoom(self, factor):
+        self.zoom_factor = factor
+        if self.base_pixmap and not self.base_pixmap.isNull():
+            w = int(400 * self.zoom_factor)
+            h = int(360 * self.zoom_factor)
+            self.setFixedSize(w, h)
+            self.update()
+            
+    def set_image(self, pixmap):
+        self.base_pixmap = pixmap
+        self.selection_rect = None
+        if self.base_pixmap and not self.base_pixmap.isNull():
+            w = int(400 * self.zoom_factor)
+            h = int(360 * self.zoom_factor)
+            self.setFixedSize(w, h)
+        self.update()
+        
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if not self.base_pixmap or self.base_pixmap.isNull():
+            return
+            
+        painter = QPainter(self)
+        # Draw the scaled image
+        scaled_pix = self.base_pixmap.scaled(self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        x = (self.width() - scaled_pix.width()) // 2
+        y = (self.height() - scaled_pix.height()) // 2
+        painter.drawPixmap(x, y, scaled_pix)
+        
+        # Draw selection rectangle if exists
+        if self.selection_rect and self.selection_rect.isValid():
+            pen = QPen(QColor(99, 102, 241), 2, Qt.DashLine)
+            painter.setPen(pen)
+            painter.setBrush(QBrush(QColor(99, 102, 241, 40)))
+            painter.drawRect(self.selection_rect)
+        painter.end()
+            
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.start_pos = event.pos()
+            self.current_pos = event.pos()
+            self.selection_rect = QRect(self.start_pos, self.current_pos)
+            self.update()
+            
+    def mouseMoveEvent(self, event):
+        if event.buttons() & Qt.LeftButton and self.start_pos:
+            self.current_pos = event.pos()
+            self.selection_rect = QRect(self.start_pos, self.current_pos).normalized()
+            self.update()
+            
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton and self.start_pos:
+            self.current_pos = event.pos()
+            self.selection_rect = QRect(self.start_pos, self.current_pos).normalized()
+            self.update()
+            self.start_pos = None
+            
+            # Convert label coords to original image pixels
+            if self.selection_rect.isValid() and self.base_pixmap and not self.base_pixmap.isNull():
+                lbl_w, lbl_h = self.width(), self.height()
+                pix_w, pix_h = self.base_pixmap.width(), self.base_pixmap.height()
+                
+                scale = min(lbl_w / pix_w, lbl_h / pix_h)
+                fit_w = int(pix_w * scale)
+                fit_h = int(pix_h * scale)
+                
+                x_offset = (lbl_w - fit_w) // 2
+                y_offset = (lbl_h - fit_h) // 2
+                
+                rx = self.selection_rect.x() - x_offset
+                ry = self.selection_rect.y() - y_offset
+                rw = self.selection_rect.width()
+                rh = self.selection_rect.height()
+                
+                orig_x = int(rx / scale)
+                orig_y = int(ry / scale)
+                orig_w = int(rw / scale)
+                orig_h = int(rh / scale)
+                
                 orig_x = max(0, min(orig_x, pix_w - 1))
                 orig_y = max(0, min(orig_y, pix_h - 1))
                 orig_w = max(1, min(orig_w, pix_w - orig_x))
@@ -1010,3 +1274,112 @@ class RegionSelectLabel(QLabel):
                 
                 self.region_selected.emit(QRect(orig_x, orig_y, orig_w, orig_h))
 
+class ZoomPanImagePreview(QFrame):
+    def __init__(self, file_path=None, parent=None, is_svg=False, is_region_select=False):
+        super().__init__(parent)
+        self.pan_active = False
+        self.pan_start_pos = QPoint()
+        self.img_start_pos = QPoint()
+        self.zoom_factor = 1.0
+        self.is_region_select = is_region_select
+        
+        self.setMinimumSize(250, 250)
+        self.setMouseTracking(True)
+        
+        if is_region_select:
+            self.img_label = RegionSelectLabel(self)
+        elif is_svg:
+            self.img_label = TransparentSvgLabel(self)
+        else:
+            self.img_label = TransparentImageLabel(self)
+            
+        self.img_label.setCursor(Qt.OpenHandCursor if not is_region_select else Qt.CrossCursor)
+        
+        if file_path:
+            pixmap = QPixmap(file_path)
+            if not pixmap.isNull():
+                self.img_label.set_image(pixmap)
+            else:
+                self.img_label.setText("Preview unavailable")
+                
+        self.img_label.installEventFilter(self)
+        self.installEventFilter(self)
+        
+    def center_image(self, animate=False):
+        target_x = (self.width() - self.img_label.width()) // 2
+        target_y = (self.height() - self.img_label.height()) // 2
+        target_pos = QPoint(target_x, target_y)
+        
+        if animate:
+            self.anim = QPropertyAnimation(self.img_label, b"pos")
+            self.anim.setDuration(250)
+            self.anim.setEasingCurve(QEasingCurve.OutQuad)
+            self.anim.setStartValue(self.img_label.pos())
+            self.anim.setEndValue(target_pos)
+            self.anim.start()
+        else:
+            self.img_label.move(target_pos)
+            
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if not hasattr(self, '_first_resize'):
+            self._first_resize = True
+            self.center_image()
+
+    def eventFilter(self, obj, event):
+        if obj == self.img_label or obj == self:
+            pan_button = Qt.RightButton if self.is_region_select else Qt.LeftButton
+            
+            if event.type() == QEvent.MouseButtonDblClick:
+                if event.button() == pan_button:
+                    self.center_image(animate=True)
+                    return True
+            elif event.type() == QEvent.MouseButtonPress:
+                if event.button() == pan_button:
+                    self.pan_active = True
+                    self.pan_start_pos = event.globalPosition().toPoint()
+                    self.img_start_pos = self.img_label.pos()
+                    self.img_label.setCursor(Qt.ClosedHandCursor)
+                    return True
+            elif event.type() == QEvent.MouseButtonRelease:
+                if event.button() == pan_button:
+                    self.pan_active = False
+                    self.img_label.setCursor(Qt.OpenHandCursor if not self.is_region_select else Qt.CrossCursor)
+                    return True
+            elif event.type() == QEvent.MouseMove:
+                if getattr(self, 'pan_active', False):
+                    delta = event.globalPosition().toPoint() - self.pan_start_pos
+                    new_pos = self.img_start_pos + delta
+                    self.img_label.move(new_pos)
+                    return True
+            elif event.type() == QEvent.Wheel:
+                global_pos = event.globalPosition().toPoint()
+                local_mouse = self.img_label.mapFromGlobal(global_pos)
+                
+                delta = event.angleDelta().y()
+                old_factor = self.zoom_factor
+                step = 0.15
+                if delta > 0:
+                    new_factor = min(4.0, old_factor + step)
+                else:
+                    new_factor = max(0.2, old_factor - step)
+                
+                if new_factor != old_factor:
+                    self.zoom_factor = new_factor
+                    
+                    old_w = self.img_label.width()
+                    old_h = self.img_label.height()
+                    old_pos = self.img_label.pos()
+                    
+                    self.img_label.set_zoom(new_factor)
+                    
+                    ratio_w = self.img_label.width() / old_w if old_w else 1
+                    ratio_h = self.img_label.height() / old_h if old_h else 1
+                    
+                    new_x = old_pos.x() - local_mouse.x() * (ratio_w - 1)
+                    new_y = old_pos.y() - local_mouse.y() * (ratio_h - 1)
+                    
+                    self.img_label.move(int(new_x), int(new_y))
+                    
+                return True
+        return super().eventFilter(obj, event)

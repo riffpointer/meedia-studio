@@ -9,45 +9,23 @@ Meedia Studio is a desktop application that helps you remove backgrounds from im
 * Zoom in and out to compare the original and processed images side by side.
 * Support for upscaling images to make them larger and clearer.
 
-## Project Structure
-
-The code is split into several smaller files in the `src` folder for better management:
-
-* `main.py` - The main file that starts the application.
-* `src/config.py` - Settings and model details used by the app.
-* `src/utils.py` - Simple helper functions for images, files, and vectorizing.
-* `src/workers.py` - Background tasks that run the AI models without freezing the screen.
-* `src/widgets.py` - Custom visual elements like the tab bar and image cards.
-* `src/dialogs.py` - Pop-up windows for settings, previews, and confirmations.
-* `src/main_window.py` - The main layout and logic of the application screen.
-
 ## Requirements
+
+This program utilizes some local AI tools. You don't need a super computer to run most of the tools in this app, but it's recommended to have an RTX or an RX XT series GPU. Tool compatibility varies according to the GPU, so if something does not work well on your GPU setup, please let us know by opening an issue! This app has been tested on Nvidia RTX 5060.
 
 Before running the application, make sure you have Python installed on your computer.
 
-The application also requires the following Python libraries:
-* PySide6 (for the user interface)
-* rembg (for background removal)
-* pillow (for image processing)
-
-You can install all required libraries by running this command in your terminal:
-
+Install all required libraries by running this command:
 ```bash
 pip install -r requirements.txt
 ```
 
 ## How to Run
 
-To start the application, run this command in your terminal:
-
+To start the application, run this command:
 ```bash
 python main.py
 ```
 
-## How to Use
-
-1. Open the application.
-2. Click the button to select and load an image.
-3. Select the AI model you want to use from the settings menu.
-4. Click the process button to remove the background.
-5. Save your new image with a transparent background.
+## License
+Licensed under the Mozilla Public License Version 2.0. For more info, read [LICENSE](LICENSE).

@@ -1,6 +1,19 @@
 import os
 import sys
 from PySide6.QtGui import QImage
+def get_app_data_dir():
+    app_author = "RPSoft"
+    app_name = "MeediaStudio"
+    
+    if sys.platform == "win32":
+        base_dir = os.environ.get("LOCALAPPDATA", os.path.expanduser("~\\AppData\\Local"))
+        return os.path.join(base_dir, app_author, app_name)
+    elif sys.platform == "darwin":
+        return os.path.join(os.path.expanduser("~"), "Library", "Application Support", app_author, app_name)
+    else:
+        # Linux and other Unix-like
+        base_dir = os.environ.get("XDG_DATA_HOME", os.path.join(os.path.expanduser("~"), ".local", "share"))
+        return os.path.join(base_dir, app_author, app_name)
 
 # Helper function to find Real-ESRGAN executable recursively in a directory
 def find_realesrgan_exe(dir_path):

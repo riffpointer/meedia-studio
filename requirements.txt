@@ -1,3 +1,6 @@
 rembg[gpu]
 PySide6
 pillow
+beautifulsoup4
+requests
+playsound

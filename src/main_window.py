@@ -7,30 +7,121 @@ import shutil
 import subprocess
 
 from PySide6.QtCore import Qt, QSize, QTimer, QEvent, QPoint, QUrl, QMimeData
-from PySide6.QtGui import QPixmap, QImage, QPainter, QBrush, QColor, QPalette, QClipboard, QKeySequence
+from PySide6.QtGui import QPixmap, QImage, QPainter, QBrush, QColor, QPalette, QClipboard, QKeySequence, QIcon
 from PySide6.QtWidgets import (
     QMainWindow, QApplication, QWidget, QVBoxLayout, QHBoxLayout,
     QGridLayout, QPushButton, QLabel, QScrollArea, QDialog,
     QFileDialog, QMessageBox, QProgressBar, QFrame, QGraphicsDropShadowEffect,
-    QComboBox, QCheckBox, QSlider, QTabWidget, QMenu, QInputDialog, QLineEdit
+    QComboBox, QCheckBox, QSlider, QTabWidget, QMenu, QInputDialog, QLineEdit, QStackedWidget
 )
 from PySide6.QtGui import QShortcut
 
 from src.config import REMBG_AVAILABLE, MODEL_FILENAMES
-from src.utils import find_realesrgan_exe
+from src.utils import find_realesrgan_exe, get_app_data_dir
 from src.widgets import DragTabBar, ImageCard, DroppableScrollArea, ToastNotification
-from src.workers import FileDownloadWorker, BGRemovalWorker, UpscaleWorker, VectorizerWorker, RestorationWorker
+from src.duplicate_cleaner_dialog import DuplicateCleanerDialog
+from src.workers import FileDownloadWorker, BGRemovalWorker, UpscaleWorker, VectorizerWorker, RestorationWorker, VideoConvertWorker
 from src.dialogs import (
+    SmartCropConfirmDialog, BatchSmartCropConfirmDialog, IconGenConfirmDialog, BatchIconGenConfirmDialog, MetadataViewerDialog, BatchMetadataConfirmDialog,
     ConfirmDialog, BatchConfirmDialog, UpscaleConfirmDialog, BatchUpscaleConfirmDialog,
     VectorConfirmDialog, VectorComparisonDialog, BatchVectorConfirmDialog, LoadingDialog,
-    ComparisonDialog, BatchComparisonDialog, SettingsDialog, RestorationConfirmDialog, BatchRestorationConfirmDialog
+    ComparisonDialog, BatchComparisonDialog, SettingsDialog, RestorationConfirmDialog, BatchRestorationConfirmDialog,
+    VideoConvertConfirmDialog, BatchVideoConvertConfirmDialog
 )
 from src.font_downloader_worker import DownloadWorker
 from src.font_downloader_dialogs import DownloadProgressDialog, FontInfoDialog, FormatHelpDialog
 from src.font_install_progress_dialog import FontInstallProgressDialog
+from src.myinstants_tab import MyInstantsTab
+
+def _get_tc():
+    """Alias for get_theme_colors() usable before class is instantiated."""
+    return get_theme_colors()
+
 from PySide6.QtCore import QThread, Signal, Slot, QThreadPool
 from PySide6.QtWidgets import QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView
 import requests
+
+def get_theme_colors():
+    """Return the current theme's colour tokens as a dict.
+    Reads the same settings source as apply_theme() so it stays in sync.
+    Safe to call from dialogs and other modules.
+    """
+    import json, sys
+    from src.utils import get_app_data_dir
+    from PySide6.QtGui import QColor
+    settings_path = os.path.join(get_app_data_dir(), "settings.json")
+    theme_mode = "Dark"
+    if os.path.exists(settings_path):
+        try:
+            with open(settings_path) as f:
+                theme_mode = json.load(f).get("theme_mode", "Dark")
+        except Exception:
+            pass
+    if theme_mode == "Auto (System)":
+        try:
+            import winreg
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
+            val, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
+            is_light = (val == 1)
+        except Exception:
+            is_light = False
+    else:
+        is_light = (theme_mode == "Light")
+
+    system_accent = "#6366f1"
+    system_accent_hover = "#4f46e5"
+    if sys.platform == "win32":
+        try:
+            import winreg
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\DWM")
+            value, _ = winreg.QueryValueEx(key, "ColorizationColor")
+            winreg.CloseKey(key)
+            hex_val = hex(value)[2:].zfill(8)
+            r = int(hex_val[2:4], 16); g = int(hex_val[4:6], 16); b = int(hex_val[6:8], 16)
+            system_accent = f"#{hex_val[2:4]}{hex_val[4:6]}{hex_val[6:8]}"
+            system_accent_hover = f"#{max(0,int(r*0.85)):02x}{max(0,int(g*0.85)):02x}{max(0,int(b*0.85)):02x}"
+        except Exception:
+            pass
+
+    accent_color = QColor(system_accent)
+    h = accent_color.hslHue()
+    if h == -1: h = 0
+    def tint(hex_color, saturation=15):
+        c = QColor(hex_color)
+        c.setHsl(h, saturation, c.lightness())
+        return c.name()
+
+    return {
+        "is_light":             is_light,
+        "accent":               system_accent,
+        "accent_hover":         system_accent_hover,
+        "win_bg":               tint("#f9fafb", 10) if is_light else tint("#0f0f13", 15),
+        "dialog_bg":            "#ffffff" if is_light else tint("#18181b", 20),
+        "card_bg":              "#ffffff" if is_light else tint("#1e1e24", 25),
+        "border":               tint("#e5e7eb", 20) if is_light else tint("#1f2937", 35),
+        "border_subtle":        tint("#d1d5db", 10) if is_light else tint("#2d2d39", 20),
+        "text":                 "#111827" if is_light else "#e2e8f0",
+        "text_muted":           tint("#4b5563", 30) if is_light else tint("#94a3b8", 30),
+        "text_bright":          "#111827" if is_light else "#ffffff",
+        "input_bg":             "#ffffff" if is_light else tint("#1e1e24", 25),
+        "scrollbar_handle":     tint("#cbd5e1", 20) if is_light else tint("#374151", 30),
+        "scrollbar_bg":         tint("#f3f4f6", 15) if is_light else tint("#16161a", 15),
+        "image_preview_bg":     "#f3f4f6" if is_light else tint("#0f0f13", 15),
+        "image_preview_border": tint("#d1d5db", 10) if is_light else tint("#2d2d39", 20),
+        "secondary_btn_bg":     tint("#e5e7eb", 10) if is_light else tint("#1f2937", 20),
+        "secondary_btn_border": tint("#d1d5db", 15) if is_light else tint("#374151", 25),
+        "secondary_btn_hover":  tint("#d1d5db", 10) if is_light else tint("#374151", 20),
+        "menu_bg":              "#f9fafb" if is_light else tint("#1a1a20", 15),
+        "loading_muted":        "#6b7280" if is_light else "#888888",
+        "loading_subtle":       "#9ca3af" if is_light else "#666666",
+        "success":              "#059669",
+        "success_hover":        "#047857",
+        "success_deep":         "#065f46",
+        "success_text":         "#22b573",
+        "warning_text":         "#fbbf24",
+        "error_color":          "#ef4444",
+    }
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -41,6 +132,20 @@ class MainWindow(QMainWindow):
         self.upscaler_cards = []
         self.vectorizer_cards = []
         self.restoration_cards = []
+        self.vid_cards = []
+        self.crop_cards = []
+        if hasattr(self, 'icon_cards'):
+            for card in self.icon_cards:
+                card.deleteLater()
+        self.icon_cards = []
+        if hasattr(self, 'meta_cards'):
+            for card in self.meta_cards:
+                card.deleteLater()
+        self.meta_cards = []
+        self.meta_cards = []
+        self.icon_cards = []
+        self.meta_cards = []
+        self.vid_params = {}
         self.active_tool = 'bg_remover'
         
         # Undo stack for batch deletions: list of [(original_path, backup_path), ...] per operation
@@ -80,7 +185,7 @@ class MainWindow(QMainWindow):
         if not REMBG_AVAILABLE:
             self.warning_banner = QLabel(self)
             self.warning_banner.setText("[Dependency Error] rembg is not installed. Background removal is disabled. Run: pip install \"rembg[gpu]\" or pip install \"rembg\"")
-            self.warning_banner.setStyleSheet("background-color: #7f1d1d; color: #fecaca; border: 1px solid #b91c1c; border-radius: 6px; padding: 10px; font-weight: 500; font-size: 13px;")
+            self.warning_banner.setObjectName("warningBanner")
             self.warning_banner.setAlignment(Qt.AlignCenter)
             main_layout.addWidget(self.warning_banner)
         
@@ -99,15 +204,20 @@ class MainWindow(QMainWindow):
         
         # Settings & Refresh Controls
         self.btn_settings = QPushButton("Settings", self)
-        self.btn_settings.setStyleSheet("""
-            QPushButton { background-color: #1f2937; border: 1px solid #374151; }
-            QPushButton:hover { background-color: #374151; }
-        """)
+        self.btn_settings.setIcon(QIcon("res/icons/bootstrap-png/gear.png"))
+        self.btn_settings.setObjectName("secondaryButton")
         self.btn_settings.clicked.connect(self.on_settings)
         
         self.btn_refresh = QPushButton("Refresh", self)
+        self.btn_refresh.setIcon(QIcon("res/icons/bootstrap-png/arrow-clockwise.png"))
         self.btn_refresh.clicked.connect(self.on_refresh)
         
+        self.btn_duplicates = QPushButton("Clean Duplicates", self)
+        self.btn_duplicates.setIcon(QIcon("res/icons/bootstrap-png/magic.png"))
+        self.btn_duplicates.setObjectName("secondaryButton")
+        self.btn_duplicates.clicked.connect(self.on_clean_duplicates)
+        
+        header_layout.addWidget(self.btn_duplicates)
         header_layout.addWidget(self.btn_settings)
         header_layout.addWidget(self.btn_refresh)
         main_layout.addWidget(header_widget)
@@ -117,36 +227,7 @@ class MainWindow(QMainWindow):
         self.tabs.setObjectName("mainTabs")
         self.tabs.setTabBar(DragTabBar(self.tabs))
         self.tabs.setTabPosition(QTabWidget.West)
-        self.tabs.setStyleSheet("""
-            QTabWidget::pane {
-                border: 1px solid #1f2937;
-                background-color: transparent;
-                border-top-left-radius: 0px;
-                border-top-right-radius: 8px;
-                border-bottom-left-radius: 8px;
-                border-bottom-right-radius: 8px;
-            }
-            QTabBar::tab {
-                background-color: #111827;
-                color: #9ca3af;
-                border: 1px solid #1f2937;
-                border-right: none;
-                border-top-left-radius: 6px;
-                border-bottom-left-radius: 6px;
-                padding: 6px 10px;
-                font-weight: bold;
-                font-size: 13px;
-            }
-            QTabBar::tab:selected {
-                background-color: #1f2937;
-                color: #ffffff;
-                border-color: #374151;
-            }
-            QTabBar::tab:hover {
-                background-color: #1f2937;
-                color: #6366f1;
-            }
-        """)
+        self.tabs.setStyleSheet("")
         
         # 1. Background Remover Tab Widget
         self.bg_tab = QWidget()
@@ -173,31 +254,31 @@ class MainWindow(QMainWindow):
         # Process Row Container (BG Remover)
         self.bg_batch_row = QWidget(self.bg_tab)
         self.bg_batch_row.setAttribute(Qt.WA_StyledBackground, True)
-        self.bg_batch_row.setStyleSheet("background: transparent; background-color: transparent; border: none;")
         bg_row_layout = QHBoxLayout(self.bg_batch_row)
         bg_row_layout.setContentsMargins(0, 0, 0, 0)
         bg_row_layout.setSpacing(10)
         
-        self.bg_btn_select_all = QPushButton("Select All", self.bg_batch_row)
+        self.bg_search = QLineEdit(self.bg_batch_row)
+        self.bg_search.setPlaceholderText("Search images...")
+        self.bg_search.addAction(QIcon("res/icons/bootstrap-png/search.png"), QLineEdit.LeadingPosition)
+        self.bg_search.textChanged.connect(self.filter_bg_grid)
+        bg_row_layout.addWidget(self.bg_search, 1)
+        
+        self.bg_btn_select_all = QCheckBox("Select All", self.bg_batch_row)
+        self.bg_btn_select_all.setVisible(False)
         self.bg_btn_select_all.setObjectName("selectAllButton")
         self.bg_btn_select_all.clicked.connect(self.select_all_bg)
+        bg_row_layout.addWidget(self.bg_btn_select_all)
         
         self.bg_btn_batch = QPushButton("Process Selected (0)", self.bg_batch_row)
-        self.bg_btn_batch.setStyleSheet("""
-            QPushButton { background-color: #059669; }
-            QPushButton:hover { background-color: #047857; }
-            QPushButton:pressed { background-color: #065f46; }
-        """)
-        self.bg_btn_batch.setEnabled(False)
         self.bg_btn_batch.clicked.connect(self.on_process_selected_bg)
-        
-        bg_row_layout.addWidget(self.bg_btn_select_all)
-        bg_row_layout.addWidget(self.bg_btn_batch, 1)
+        self.bg_btn_batch.setEnabled(False)
+        bg_row_layout.addWidget(self.bg_btn_batch)
         
         self.bg_batch_row.setVisible(False)
-        bg_layout.addWidget(self.bg_batch_row)
+        bg_layout.insertWidget(0, self.bg_batch_row)
         
-        self.tabs.addTab(self.bg_tab, "BG Remover")
+        self.tabs.addTab(self.bg_tab, QIcon("res/icons/bootstrap-png/person-bounding-box.png"), "BG Remover")
         
         # 2. AI Upscaler Tab Widget
         self.upscaler_tab = QWidget()
@@ -224,31 +305,35 @@ class MainWindow(QMainWindow):
         # Process Row Container (Upscaler)
         self.up_batch_row = QWidget(self.upscaler_tab)
         self.up_batch_row.setAttribute(Qt.WA_StyledBackground, True)
-        self.up_batch_row.setStyleSheet("background: transparent; background-color: transparent; border: none;")
         up_row_layout = QHBoxLayout(self.up_batch_row)
         up_row_layout.setContentsMargins(0, 0, 0, 0)
         up_row_layout.setSpacing(10)
         
-        self.up_btn_select_all = QPushButton("Select All", self.up_batch_row)
+        self.up_search = QLineEdit(self.up_batch_row)
+        self.up_search.setPlaceholderText("Search images...")
+        self.up_search.addAction(QIcon("res/icons/bootstrap-png/search.png"), QLineEdit.LeadingPosition)
+        self.up_search.textChanged.connect(self.filter_up_grid)
+        up_row_layout.addWidget(self.up_search, 1)
+        
+        self.up_btn_select_all = QCheckBox("Select All", self.up_batch_row)
+        self.up_btn_select_all.setVisible(False)
         self.up_btn_select_all.setObjectName("selectAllButton")
         self.up_btn_select_all.clicked.connect(self.select_all_upscaler)
+        up_row_layout.addWidget(self.up_btn_select_all)
         
         self.up_btn_batch = QPushButton("Upscale Selected (0)", self.up_batch_row)
-        self.up_btn_batch.setStyleSheet("""
-            QPushButton { background-color: #6366f1; }
-            QPushButton:hover { background-color: #4f46e5; }
-            QPushButton:pressed { background-color: #4338ca; }
-        """)
+        self.up_btn_batch.clicked.connect(self.on_process_selected_upscaler)
+        up_row_layout.addWidget(self.up_btn_batch)
         self.up_btn_batch.setEnabled(False)
         self.up_btn_batch.clicked.connect(self.on_process_selected_upscaler)
         
         up_row_layout.addWidget(self.up_btn_select_all)
-        up_row_layout.addWidget(self.up_btn_batch, 1)
+        up_row_layout.addWidget(self.up_btn_batch)
         
         self.up_batch_row.setVisible(False)
-        upscaler_layout.addWidget(self.up_batch_row)
+        upscaler_layout.insertWidget(0, self.up_batch_row)
         
-        self.tabs.addTab(self.upscaler_tab, "AI Upscaler")
+        self.tabs.addTab(self.upscaler_tab, QIcon("res/icons/bootstrap-png/arrows-angle-expand.png"), "AI Upscaler")
         
         # 3. SVG Vectorizer Tab Widget
         self.vectorizer_tab = QWidget()
@@ -274,31 +359,35 @@ class MainWindow(QMainWindow):
         # Process Row Container (Vectorizer)
         self.vec_batch_row = QWidget(self.vectorizer_tab)
         self.vec_batch_row.setAttribute(Qt.WA_StyledBackground, True)
-        self.vec_batch_row.setStyleSheet("background: transparent; background-color: transparent; border: none;")
         vec_row_layout = QHBoxLayout(self.vec_batch_row)
         vec_row_layout.setContentsMargins(0, 0, 0, 0)
         vec_row_layout.setSpacing(10)
         
-        self.vec_btn_select_all = QPushButton("Select All", self.vec_batch_row)
+        self.vec_search = QLineEdit(self.vec_batch_row)
+        self.vec_search.setPlaceholderText("Search images...")
+        self.vec_search.addAction(QIcon("res/icons/bootstrap-png/search.png"), QLineEdit.LeadingPosition)
+        self.vec_search.textChanged.connect(self.filter_vec_grid)
+        vec_row_layout.addWidget(self.vec_search, 1)
+        
+        self.vec_btn_select_all = QCheckBox("Select All", self.vec_batch_row)
+        self.vec_btn_select_all.setVisible(False)
         self.vec_btn_select_all.setObjectName("selectAllButton")
         self.vec_btn_select_all.clicked.connect(self.select_all_vectorizer)
+        vec_row_layout.addWidget(self.vec_btn_select_all)
         
         self.vec_btn_batch = QPushButton("Vectorize Selected (0)", self.vec_batch_row)
-        self.vec_btn_batch.setStyleSheet("""
-            QPushButton { background-color: #6366f1; }
-            QPushButton:hover { background-color: #4f46e5; }
-            QPushButton:pressed { background-color: #4338ca; }
-        """)
+        self.vec_btn_batch.clicked.connect(self.on_process_selected_vectorizer)
+        vec_row_layout.addWidget(self.vec_btn_batch)
         self.vec_btn_batch.setEnabled(False)
         self.vec_btn_batch.clicked.connect(self.on_process_selected_vectorizer)
         
         vec_row_layout.addWidget(self.vec_btn_select_all)
-        vec_row_layout.addWidget(self.vec_btn_batch, 1)
+        vec_row_layout.addWidget(self.vec_btn_batch)
         
         self.vec_batch_row.setVisible(False)
-        vectorizer_layout.addWidget(self.vec_batch_row)
+        vectorizer_layout.insertWidget(0, self.vec_batch_row)
         
-        self.tabs.addTab(self.vectorizer_tab, "SVG Vectorizer")
+        self.tabs.addTab(self.vectorizer_tab, QIcon("res/icons/bootstrap-png/vector-pen.png"), "SVG Vectorizer")
         
         # 4. Restoration Tab Widget
         self.restoration_tab = QWidget()
@@ -324,33 +413,236 @@ class MainWindow(QMainWindow):
         # Process Row Container (Restoration)
         self.rest_batch_row = QWidget(self.restoration_tab)
         self.rest_batch_row.setAttribute(Qt.WA_StyledBackground, True)
-        self.rest_batch_row.setStyleSheet("background: transparent; background-color: transparent; border: none;")
         rest_row_layout = QHBoxLayout(self.rest_batch_row)
         rest_row_layout.setContentsMargins(0, 0, 0, 0)
         rest_row_layout.setSpacing(10)
         
-        self.rest_btn_select_all = QPushButton("Select All", self.rest_batch_row)
+        self.rest_search = QLineEdit(self.rest_batch_row)
+        self.rest_search.setPlaceholderText("Search images...")
+        self.rest_search.addAction(QIcon("res/icons/bootstrap-png/search.png"), QLineEdit.LeadingPosition)
+        self.rest_search.textChanged.connect(self.filter_rest_grid)
+        rest_row_layout.addWidget(self.rest_search, 1)
+        
+        self.rest_btn_select_all = QCheckBox("Select All", self.rest_batch_row)
+        self.rest_btn_select_all.setVisible(False)
         self.rest_btn_select_all.setObjectName("selectAllButton")
         self.rest_btn_select_all.clicked.connect(self.select_all_restoration)
+        rest_row_layout.addWidget(self.rest_btn_select_all)
         
         self.rest_btn_batch = QPushButton("Restore Selected (0)", self.rest_batch_row)
-        self.rest_btn_batch.setStyleSheet("""
-            QPushButton { background-color: #6366f1; }
-            QPushButton:hover { background-color: #4f46e5; }
-            QPushButton:pressed { background-color: #4338ca; }
-        """)
+        self.rest_btn_batch.clicked.connect(self.on_process_selected_restoration)
+        rest_row_layout.addWidget(self.rest_btn_batch)
         self.rest_btn_batch.setEnabled(False)
         self.rest_btn_batch.clicked.connect(self.on_process_selected_restoration)
         
         rest_row_layout.addWidget(self.rest_btn_select_all)
-        rest_row_layout.addWidget(self.rest_btn_batch, 1)
+        rest_row_layout.addWidget(self.rest_btn_batch)
         
         self.rest_batch_row.setVisible(False)
-        restoration_layout.addWidget(self.rest_batch_row)
+        restoration_layout.insertWidget(0, self.rest_batch_row)
         
-        self.tabs.addTab(self.restoration_tab, "Denoise && Deblur")
+        self.tabs.addTab(self.restoration_tab, QIcon("res/icons/bootstrap-png/magic.png"), "Denoise && Deblur")
         
-        # 5. Google Fonts Downloader Tab Widget
+
+        # 5. Video to GIF/WebP Tab Widget
+        self.vid_tab = QWidget()
+        vid_layout = QVBoxLayout(self.vid_tab)
+        vid_layout.setContentsMargins(10, 10, 10, 10)
+        vid_layout.setSpacing(12)
+        
+        self.vid_scroll_area = DroppableScrollArea(self.vid_tab)
+        self.vid_scroll_area.setWidgetResizable(True)
+        self.vid_scroll_widget = QWidget()
+        self.vid_scroll_widget.setObjectName("scrollContainer")
+        
+        self.vid_scroll_widget.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.vid_scroll_widget.customContextMenuRequested.connect(self.show_grid_context_menu)
+        
+        self.vid_grid_layout = QGridLayout(self.vid_scroll_widget)
+        self.vid_grid_layout.setSpacing(16)
+        self.vid_grid_layout.setContentsMargins(10, 10, 10, 10)
+        self.vid_scroll_area.setWidget(self.vid_scroll_widget)
+        self.vid_scroll_area.files_dropped.connect(self.on_files_dropped)
+        vid_layout.addWidget(self.vid_scroll_area, 1)
+        
+        # Process Row Container (Video)
+        self.vid_batch_row = QWidget(self.vid_tab)
+        self.vid_batch_row.setAttribute(Qt.WA_StyledBackground, True)
+        vid_row_layout = QHBoxLayout(self.vid_batch_row)
+        vid_row_layout.setContentsMargins(0, 0, 0, 0)
+        vid_row_layout.setSpacing(10)
+        
+        self.vid_search = QLineEdit(self.vid_batch_row)
+        self.vid_search.setPlaceholderText("Search videos...")
+        self.vid_search.addAction(QIcon("res/icons/bootstrap-png/search.png"), QLineEdit.LeadingPosition)
+        self.vid_search.textChanged.connect(self.filter_vid_grid)
+        vid_row_layout.addWidget(self.vid_search, 1)
+        
+        self.vid_btn_select_all = QCheckBox("Select All", self.vid_batch_row)
+        self.vid_btn_select_all.setVisible(False)
+        self.vid_btn_select_all.setObjectName("selectAllButton")
+        self.vid_btn_select_all.clicked.connect(self.select_all_vid)
+        vid_row_layout.addWidget(self.vid_btn_select_all)
+        
+        self.vid_btn_batch = QPushButton("Convert Selected (0)", self.vid_batch_row)
+        self.vid_btn_batch.clicked.connect(self.on_process_selected_vid)
+        self.vid_btn_batch.setEnabled(False)
+        vid_row_layout.addWidget(self.vid_btn_batch)
+        
+        self.vid_batch_row.setVisible(False)
+        vid_layout.insertWidget(0, self.vid_batch_row)
+        
+        self.tabs.addTab(self.vid_tab, QIcon("res/icons/bootstrap-png/play-fill.png"), "Video Converter")
+
+        # 8. Smart Crop Tab Widget
+        self.crop_tab = QWidget()
+        crop_layout = QVBoxLayout(self.crop_tab)
+        crop_layout.setContentsMargins(10, 10, 10, 10)
+        crop_layout.setSpacing(12)
+        
+        self.crop_scroll_area = DroppableScrollArea(self.crop_tab)
+        self.crop_scroll_area.setWidgetResizable(True)
+        self.crop_scroll_widget = QWidget()
+        self.crop_scroll_widget.setObjectName("scrollContainer")
+        
+        self.crop_scroll_widget.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.crop_scroll_widget.customContextMenuRequested.connect(self.show_grid_context_menu)
+        
+        self.crop_grid_layout = QGridLayout(self.crop_scroll_widget)
+        self.crop_grid_layout.setSpacing(16)
+        self.crop_grid_layout.setContentsMargins(10, 10, 10, 10)
+        self.crop_scroll_area.setWidget(self.crop_scroll_widget)
+        self.crop_scroll_area.files_dropped.connect(self.on_files_dropped)
+        crop_layout.addWidget(self.crop_scroll_area, 1)
+        
+        self.crop_batch_row = QWidget(self.crop_tab)
+        self.crop_batch_row.setAttribute(Qt.WA_StyledBackground, True)
+        crop_row_layout = QHBoxLayout(self.crop_batch_row)
+        crop_row_layout.setContentsMargins(0, 0, 0, 0)
+        crop_row_layout.setSpacing(10)
+        
+        self.crop_search = QLineEdit(self.crop_batch_row)
+        self.crop_search.setPlaceholderText("Search images...")
+        self.crop_search.addAction(QIcon("res/icons/bootstrap-png/search.png"), QLineEdit.LeadingPosition)
+        self.crop_search.textChanged.connect(self.filter_crop_grid)
+        crop_row_layout.addWidget(self.crop_search, 1)
+        
+        self.crop_btn_select_all = QCheckBox("Select All", self.crop_batch_row)
+        self.crop_btn_select_all.setVisible(False)
+        self.crop_btn_select_all.setObjectName("selectAllButton")
+        self.crop_btn_select_all.clicked.connect(self.select_all_crop)
+        crop_row_layout.addWidget(self.crop_btn_select_all)
+        
+        self.crop_btn_batch = QPushButton("Crop Selected (0)", self.crop_batch_row)
+        self.crop_btn_batch.clicked.connect(self.on_process_selected_crop)
+        self.crop_btn_batch.setEnabled(False)
+        crop_row_layout.addWidget(self.crop_btn_batch)
+        
+        self.crop_batch_row.setVisible(False)
+        crop_layout.insertWidget(0, self.crop_batch_row)
+        
+        self.tabs.addTab(self.crop_tab, QIcon("res/icons/bootstrap-png/crop.png"), "Smart Crop")
+
+        # 9. Favicon Tab Widget
+        self.icon_tab = QWidget()
+        icon_layout = QVBoxLayout(self.icon_tab)
+        icon_layout.setContentsMargins(10, 10, 10, 10)
+        icon_layout.setSpacing(12)
+        
+        self.icon_scroll_area = DroppableScrollArea(self.icon_tab)
+        self.icon_scroll_area.setWidgetResizable(True)
+        self.icon_scroll_widget = QWidget()
+        self.icon_scroll_widget.setObjectName("scrollContainer")
+        
+        self.icon_scroll_widget.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.icon_scroll_widget.customContextMenuRequested.connect(self.show_grid_context_menu)
+        
+        self.icon_grid_layout = QGridLayout(self.icon_scroll_widget)
+        self.icon_grid_layout.setSpacing(16)
+        self.icon_grid_layout.setContentsMargins(10, 10, 10, 10)
+        self.icon_scroll_area.setWidget(self.icon_scroll_widget)
+        self.icon_scroll_area.files_dropped.connect(self.on_files_dropped)
+        icon_layout.addWidget(self.icon_scroll_area, 1)
+        
+        self.icon_batch_row = QWidget(self.icon_tab)
+        self.icon_batch_row.setAttribute(Qt.WA_StyledBackground, True)
+        icon_row_layout = QHBoxLayout(self.icon_batch_row)
+        icon_row_layout.setContentsMargins(0, 0, 0, 0)
+        icon_row_layout.setSpacing(10)
+        
+        self.icon_search = QLineEdit(self.icon_batch_row)
+        self.icon_search.setPlaceholderText("Search images...")
+        self.icon_search.addAction(QIcon("res/icons/bootstrap-png/search.png"), QLineEdit.LeadingPosition)
+        self.icon_search.textChanged.connect(self.filter_icon_grid)
+        icon_row_layout.addWidget(self.icon_search, 1)
+        
+        self.icon_btn_select_all = QCheckBox("Select All", self.icon_batch_row)
+        self.icon_btn_select_all.setVisible(False)
+        self.icon_btn_select_all.setObjectName("selectAllButton")
+        self.icon_btn_select_all.clicked.connect(self.select_all_icon)
+        icon_row_layout.addWidget(self.icon_btn_select_all)
+        
+        self.icon_btn_batch = QPushButton("Generate Selected (0)", self.icon_batch_row)
+        self.icon_btn_batch.clicked.connect(self.on_process_selected_icon)
+        self.icon_btn_batch.setEnabled(False)
+        icon_row_layout.addWidget(self.icon_btn_batch)
+        
+        self.icon_batch_row.setVisible(False)
+        icon_layout.insertWidget(0, self.icon_batch_row)
+        
+        self.tabs.addTab(self.icon_tab, QIcon("res/icons/bootstrap-png/app-indicator.png"), "Favicon Gen")
+
+
+        # 10. Metadata Tab Widget
+        self.meta_tab = QWidget()
+        meta_layout = QVBoxLayout(self.meta_tab)
+        meta_layout.setContentsMargins(10, 10, 10, 10)
+        meta_layout.setSpacing(12)
+        
+        self.meta_scroll_area = DroppableScrollArea(self.meta_tab)
+        self.meta_scroll_area.setWidgetResizable(True)
+        self.meta_scroll_widget = QWidget()
+        self.meta_scroll_widget.setObjectName("scrollContainer")
+        
+        self.meta_scroll_widget.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.meta_scroll_widget.customContextMenuRequested.connect(self.show_grid_context_menu)
+        
+        self.meta_grid_layout = QGridLayout(self.meta_scroll_widget)
+        self.meta_grid_layout.setSpacing(16)
+        self.meta_grid_layout.setContentsMargins(10, 10, 10, 10)
+        self.meta_scroll_area.setWidget(self.meta_scroll_widget)
+        self.meta_scroll_area.files_dropped.connect(self.on_files_dropped)
+        meta_layout.addWidget(self.meta_scroll_area, 1)
+        
+        self.meta_batch_row = QWidget(self.meta_tab)
+        self.meta_batch_row.setAttribute(Qt.WA_StyledBackground, True)
+        meta_row_layout = QHBoxLayout(self.meta_batch_row)
+        meta_row_layout.setContentsMargins(0, 0, 0, 0)
+        meta_row_layout.setSpacing(10)
+        
+        self.meta_search = QLineEdit(self.meta_batch_row)
+        self.meta_search.setPlaceholderText("Search images...")
+        self.meta_search.addAction(QIcon("res/icons/bootstrap-png/search.png"), QLineEdit.LeadingPosition)
+        self.meta_search.textChanged.connect(self.filter_meta_grid)
+        meta_row_layout.addWidget(self.meta_search, 1)
+        
+        self.meta_btn_select_all = QCheckBox("Select All", self.meta_batch_row)
+        self.meta_btn_select_all.setVisible(False)
+        self.meta_btn_select_all.setObjectName("selectAllButton")
+        self.meta_btn_select_all.clicked.connect(self.select_all_meta)
+        meta_row_layout.addWidget(self.meta_btn_select_all)
+        
+        self.meta_btn_batch = QPushButton("Strip Selected (0)", self.meta_batch_row)
+        self.meta_btn_batch.clicked.connect(self.on_process_selected_meta)
+        self.meta_btn_batch.setEnabled(False)
+        meta_row_layout.addWidget(self.meta_btn_batch)
+        
+        self.meta_batch_row.setVisible(False)
+        meta_layout.insertWidget(0, self.meta_batch_row)
+        
+        self.tabs.addTab(self.meta_tab, QIcon("res/icons/bootstrap-png/info-circle.png"), "Metadata")
+
+        # 6. Google Fonts Downloader Tab Widget
         self.fonts_tab = QWidget()
         fonts_layout = QVBoxLayout(self.fonts_tab)
         fonts_layout.setContentsMargins(10, 10, 10, 10)
@@ -371,6 +663,7 @@ class MainWindow(QMainWindow):
         
         self.fonts_search_input = QLineEdit(self.fonts_tab)
         self.fonts_search_input.setPlaceholderText("Search fonts by name...")
+        self.fonts_search_input.addAction(QIcon("res/icons/bootstrap-png/search.png"), QLineEdit.LeadingPosition)
         fonts_filter_layout.addWidget(self.fonts_search_input, 3)
         
         self.fonts_category_combo = QComboBox(self.fonts_tab)
@@ -397,6 +690,7 @@ class MainWindow(QMainWindow):
         self.fonts_table_widget.setHorizontalHeaderLabels(["Font Family", "Category", "Styles"])
         self.fonts_table_widget.verticalHeader().setVisible(False)
         self.fonts_table_widget.setAlternatingRowColors(True)
+        self.fonts_table_widget.setSortingEnabled(True)
         self.fonts_table_widget.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.fonts_table_widget.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.fonts_table_widget.setShowGrid(False)
@@ -407,13 +701,8 @@ class MainWindow(QMainWindow):
                 border: 1px solid #374151;
                 border-radius: 8px;
             }
-            QTableWidget::item:selected {
-                background-color: #6366f1;
-                color: #ffffff;
-            }
             QHeaderView::section {
-                background-color: #1f2937;
-                color: #ffffff;
+                background-color: transparent;
                 border: none;
                 padding: 6px;
                 font-weight: bold;
@@ -430,7 +719,37 @@ class MainWindow(QMainWindow):
         self.fonts_table_widget.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
         self.fonts_table_widget.setContextMenuPolicy(Qt.CustomContextMenu)
         
-        fonts_layout.addWidget(self.fonts_table_widget)
+        self.fonts_stacked_widget = QStackedWidget(self.fonts_tab)
+        self.fonts_stacked_widget.addWidget(self.fonts_table_widget)
+        
+        self.fonts_loading_widget = QWidget()
+        fonts_loading_layout = QVBoxLayout(self.fonts_loading_widget)
+        fonts_loading_layout.setAlignment(Qt.AlignCenter)
+        fonts_loading_label = QLabel("Loading Google Fonts catalog...")
+        fonts_loading_label.setObjectName("loadingLabel")
+        fonts_loading_layout.addWidget(fonts_loading_label)
+        self.fonts_stacked_widget.addWidget(self.fonts_loading_widget)
+        
+        self.fonts_error_widget = QWidget()
+        fonts_error_layout = QVBoxLayout(self.fonts_error_widget)
+        fonts_error_layout.setAlignment(Qt.AlignCenter)
+        self.fonts_error_label = QLabel("Failed to load Google Fonts catalog.")
+        self.fonts_error_label.setObjectName("errorLabel")
+        self.fonts_error_label.setAlignment(Qt.AlignCenter)
+        fonts_error_layout.addWidget(self.fonts_error_label)
+        
+        fonts_retry_btn = QPushButton("Retry")
+        fonts_retry_btn.setFixedWidth(120)
+        fonts_retry_btn.clicked.connect(self.fetch_fonts_catalog)
+        fonts_error_layout.addWidget(fonts_retry_btn, 0, Qt.AlignHCenter)
+        
+        fonts_fallback_btn = QPushButton("Load Offline Fonts")
+        fonts_fallback_btn.setFixedWidth(150)
+        fonts_fallback_btn.clicked.connect(self.load_fallback_fonts)
+        fonts_error_layout.addWidget(fonts_fallback_btn, 0, Qt.AlignHCenter)
+        self.fonts_stacked_widget.addWidget(self.fonts_error_widget)
+        
+        fonts_layout.addWidget(self.fonts_stacked_widget)
         
         # Font Control Row
         self.fonts_control_row = QWidget(self.fonts_tab)
@@ -438,37 +757,33 @@ class MainWindow(QMainWindow):
         fonts_ctrl_layout.setContentsMargins(0, 0, 0, 0)
         
         self.fonts_selection_status_label = QLabel("0 fonts selected", self.fonts_control_row)
-        self.fonts_selection_status_label.setStyleSheet("color: #6366f1; font-weight: bold;")
+        self.fonts_selection_status_label.setStyleSheet("font-weight: bold;")
         fonts_ctrl_layout.addWidget(self.fonts_selection_status_label)
         fonts_ctrl_layout.addStretch()
         
         self.btn_fonts_open_folder = QPushButton("Open Folder", self.fonts_control_row)
+        self.btn_fonts_open_folder.setIcon(QIcon("res/icons/bootstrap-png/folder2-open.png"))
         self.btn_fonts_open_folder.clicked.connect(self.open_fonts_downloads_folder)
-        self.btn_fonts_open_folder.setStyleSheet("""
-            QPushButton { background-color: #27272a; }
-            QPushButton:hover { background-color: #3f3f46; }
-        """)
         fonts_ctrl_layout.addWidget(self.btn_fonts_open_folder)
         
         self.btn_fonts_download_selected = QPushButton("Download Selected", self.fonts_control_row)
+        self.btn_fonts_download_selected.setIcon(QIcon("res/icons/bootstrap-png/download.png"))
         self.btn_fonts_download_selected.clicked.connect(self.start_fonts_download)
-        self.btn_fonts_download_selected.setStyleSheet("""
-            QPushButton { background-color: #6366f1; }
-            QPushButton:hover { background-color: #4f46e5; }
-        """)
         fonts_ctrl_layout.addWidget(self.btn_fonts_download_selected)
         
         self.btn_fonts_install_selected = QPushButton("Install Selected", self.fonts_control_row)
+        self.btn_fonts_install_selected.setIcon(QIcon("res/icons/bootstrap-png/pc-display.png"))
         self.btn_fonts_install_selected.clicked.connect(self.start_fonts_installation)
-        self.btn_fonts_install_selected.setStyleSheet("""
-            QPushButton { background-color: #059669; }
-            QPushButton:hover { background-color: #047857; }
-        """)
         fonts_ctrl_layout.addWidget(self.btn_fonts_install_selected)
         
         fonts_layout.addWidget(self.fonts_control_row)
         
-        self.tabs.addTab(self.fonts_tab, "Google Fonts")
+        self.tabs.addTab(self.fonts_tab, QIcon("res/icons/bootstrap-png/fonts.png"), "Google Fonts")
+        
+        # 6. MyInstants Tab Widget
+        self.myinstants_tab = MyInstantsTab(self)
+        self.tabs.addTab(self.myinstants_tab, QIcon("res/icons/bootstrap-png/boombox.png"), "Soundboard")
+
         
         # Setup Font Downloader state
         self.fonts_catalog = []
@@ -495,12 +810,12 @@ class MainWindow(QMainWindow):
         # Repurposed bottom labels as status bar text
         footer_layout = QHBoxLayout()
         self.status_label = QLabel("Ready. Select checkbox to batch process, or click card directly.", self)
-        self.status_label.setStyleSheet("color: #94a3b8; font-size: 12px; font-weight: 500;")
+        self.status_label.setObjectName("statusLabel")
         footer_layout.addWidget(self.status_label)
         footer_layout.addStretch()
         
         self.items_count_label = QLabel("Items: 0", self)
-        self.items_count_label.setStyleSheet("color: #94a3b8; font-size: 12px; font-weight: 500;")
+        self.items_count_label.setObjectName("statusLabel")
         footer_layout.addWidget(self.items_count_label)
         
         main_layout.addLayout(footer_layout)
@@ -554,7 +869,7 @@ class MainWindow(QMainWindow):
     def _active_tab_index(self):
         """Return the current image-tab index (0-3); -1 if Fonts tab is active."""
         idx = self.tabs.currentIndex()
-        return idx if idx < 4 else -1
+        return idx if idx < 5 else -1
 
     # Ctrl+O — Open image files via picker and copy into primary directory
     def sc_open_images(self):
@@ -579,6 +894,8 @@ class MainWindow(QMainWindow):
             self.select_all_vectorizer()
         elif tab == 3:
             self.select_all_restoration()
+        elif tab == 4:
+            self.select_all_vid()
 
     # Delete — Remove all checked cards on the active tab (with undo support)
     def sc_delete_selected(self):
@@ -588,6 +905,7 @@ class MainWindow(QMainWindow):
             1: self.upscaler_cards,
             2: self.vectorizer_cards,
             3: self.restoration_cards,
+            4: self.vid_cards,
         }
         if tab not in card_lists:
             return
@@ -688,12 +1006,15 @@ class MainWindow(QMainWindow):
             self.on_process_selected_vectorizer()
         elif tab == 3:
             self.on_process_selected_restoration()
+        elif tab == 4:
+            self.on_process_selected_vid()
 
     # ── End Keyboard Shortcuts ────────────────────────────────────────────────
 
     def load_app_settings(self):
-        script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        self.settings_path = os.path.join(script_dir, "settings.json")
+        app_data_dir = get_app_data_dir()
+        os.makedirs(app_data_dir, exist_ok=True)
+        self.settings_path = os.path.join(app_data_dir, "settings.json")
         
         self.settings = {
             "model_name": "u2net",
@@ -709,6 +1030,14 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 print(f"Error loading settings: {e}")
                 
+        if 'window_geometry' in self.settings:
+            try:
+                from PySide6.QtCore import QByteArray
+                geom_data = QByteArray.fromBase64(self.settings['window_geometry'].encode('utf-8'))
+                self.restoreGeometry(geom_data)
+            except Exception as e:
+                print(f"Error restoring geometry: {e}")
+                
     def save_app_settings(self):
         try:
             with open(self.settings_path, 'w') as f:
@@ -716,6 +1045,14 @@ class MainWindow(QMainWindow):
         except Exception as e:
             print(f"Error saving settings: {e}")
             
+    def closeEvent(self, event):
+        try:
+            geom = self.saveGeometry().toBase64().data().decode('utf-8')
+            self.settings['window_geometry'] = geom
+            self.save_app_settings()
+        except Exception as e:
+            print(f"Error saving geometry: {e}")
+        super().closeEvent(event)
     def is_system_light_mode(self):
         try:
             import winreg
@@ -774,20 +1111,46 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
                 
-        win_bg = "#f9fafb" if is_light else "#0f0f13"
-        dialog_bg = "#ffffff" if is_light else "#18181b"
-        card_bg = "#ffffff" if is_light else "#1e1e24"
-        card_hover_bg = "#f3f4f6" if is_light else "#262630"
-        border = "#e5e7eb" if is_light else "#1f2937"
+        accent_color = QColor(system_accent)
+        h = accent_color.hslHue()
+        if h == -1: h = 0
+        
+        def tint(hex_color, saturation=15):
+            c = QColor(hex_color)
+            base_l = c.lightness()
+            c.setHsl(h, saturation, base_l)
+            return c.name()
+
+        win_bg = tint("#f9fafb", 10) if is_light else tint("#0f0f13", 15)
+        dialog_bg = "#ffffff" if is_light else tint("#18181b", 20)
+        card_bg = "#ffffff" if is_light else tint("#1e1e24", 25)
+        card_hover_bg = tint("#f3f4f6", 15) if is_light else tint("#262630", 30)
+        border = tint("#e5e7eb", 20) if is_light else tint("#1f2937", 35)
         text = "#111827" if is_light else "#e2e8f0"
-        text_muted = "#4b5563" if is_light else "#94a3b8"
+        text_muted = tint("#4b5563", 30) if is_light else tint("#94a3b8", 30)
         text_bright = "#111827" if is_light else "#ffffff"
         accent = system_accent
         accent_hover = system_accent_hover
         accent_pressed = system_accent_pressed
-        scrollbar_handle = "#cbd5e1" if is_light else "#374151"
-        scrollbar_bg = "#f3f4f6" if is_light else "#16161a"
-        input_bg = "#ffffff" if is_light else "#1e1e24"
+        scrollbar_handle = tint("#cbd5e1", 20) if is_light else tint("#374151", 30)
+        scrollbar_bg = tint("#f3f4f6", 15) if is_light else tint("#16161a", 15)
+        input_bg = "#ffffff" if is_light else tint("#1e1e24", 25)
+        
+        # Semantic status tokens
+        success         = "#059669"
+        success_hover   = "#047857"
+        success_deep    = "#065f46"
+        success_text    = "#22b573"
+        warning_text    = "#fbbf24"
+        error_color     = "#ef4444"
+        image_preview_bg = "#f3f4f6" if is_light else tint("#0f0f13", 15)
+        image_preview_border = tint("#d1d5db", 10) if is_light else tint("#2d2d39", 20)
+        secondary_btn_bg  = tint("#e5e7eb", 10) if is_light else tint("#1f2937", 20)
+        secondary_btn_border = tint("#d1d5db", 15) if is_light else tint("#374151", 25)
+        secondary_btn_hover  = tint("#d1d5db", 10) if is_light else tint("#374151", 20)
+        menu_bg          = "#f9fafb" if is_light else tint("#1a1a20", 15)
+        loading_muted    = "#6b7280" if is_light else "#888888"
+        loading_subtle   = "#9ca3af" if is_light else "#666666"
         
         return f"""
             QMainWindow {{
@@ -847,6 +1210,14 @@ class MainWindow(QMainWindow):
             QPushButton#cancelButton:hover {{
                 background-color: {text_muted};
             }}
+            QPushButton#secondaryButton {{
+                background-color: {secondary_btn_bg};
+                color: {text};
+                border: 1px solid {secondary_btn_border};
+            }}
+            QPushButton#secondaryButton:hover {{
+                background-color: {secondary_btn_hover};
+            }}
             
             QDialog {{
                 background-color: {dialog_bg};
@@ -864,6 +1235,7 @@ class MainWindow(QMainWindow):
             }}
             QLabel#sectionTitle {{
                 font-size: 13px;
+                text-align: left;
                 font-weight: bold;
                 color: {text_muted};
             }}
@@ -902,15 +1274,16 @@ class MainWindow(QMainWindow):
                 padding: 6px 10px;
                 font-weight: bold;
                 font-size: 13px;
+                text-align: left;
             }}
             QTabBar::tab:selected {{
-                background-color: {dialog_bg};
-                color: {text_bright};
-                border-color: {border};
+                background-color: {accent};
+                color: #ffffff;
+                border-color: {accent};
             }}
-            QTabBar::tab:hover {{
-                background-color: {dialog_bg};
-                color: {accent};
+            QTabBar::tab:hover:!selected {{
+                background-color: {card_hover_bg};
+                color: {text_bright};
             }}
             QComboBox {{
                 background-color: {input_bg};
@@ -973,6 +1346,32 @@ class MainWindow(QMainWindow):
                 color: {text_muted};
                 font-size: 10px;
             }}
+            #statusLabel {{
+                color: {text_muted};
+                font-size: 12px;
+                font-weight: 500;
+            }}
+            #errorLabel {{
+                color: {error_color};
+                font-size: 16px;
+            }}
+            #loadingLabel {{
+                color: {loading_muted};
+                font-size: 16px;
+            }}
+            #loadingInfoLabel {{
+                color: {loading_subtle};
+                font-size: 12px;
+            }}
+            #warningBanner {{
+                background-color: #7f1d1d;
+                color: #fecaca;
+                border: 1px solid #b91c1c;
+                border-radius: 6px;
+                padding: 10px;
+                font-weight: 500;
+                font-size: 13px;
+            }}
         """
             
     def set_status(self, text):
@@ -996,9 +1395,13 @@ class MainWindow(QMainWindow):
         selected_count = sum(1 for card in self.bg_cards if isinstance(card, ImageCard) and card.checkbox.isChecked())
         cards = [c for c in self.bg_cards if isinstance(c, ImageCard)]
         if cards and selected_count == len(cards):
-            self.bg_btn_select_all.setText("Deselect All")
+            self.bg_btn_select_all.blockSignals(True)
+            self.bg_btn_select_all.setChecked(True)
+            self.bg_btn_select_all.blockSignals(False)
         else:
-            self.bg_btn_select_all.setText("Select All")
+            self.bg_btn_select_all.blockSignals(True)
+            self.bg_btn_select_all.setChecked(False)
+            self.bg_btn_select_all.blockSignals(False)
             
         if selected_count > 0:
             self.bg_btn_batch.setText(f"Process Selected ({selected_count})")
@@ -1011,9 +1414,13 @@ class MainWindow(QMainWindow):
         selected_count = sum(1 for card in self.upscaler_cards if isinstance(card, ImageCard) and card.checkbox.isChecked())
         cards = [c for c in self.upscaler_cards if isinstance(c, ImageCard)]
         if cards and selected_count == len(cards):
-            self.up_btn_select_all.setText("Deselect All")
+            self.up_btn_select_all.blockSignals(True)
+            self.up_btn_select_all.setChecked(True)
+            self.up_btn_select_all.blockSignals(False)
         else:
-            self.up_btn_select_all.setText("Select All")
+            self.up_btn_select_all.blockSignals(True)
+            self.up_btn_select_all.setChecked(False)
+            self.up_btn_select_all.blockSignals(False)
             
         if selected_count > 0:
             self.up_btn_batch.setText(f"Upscale Selected ({selected_count})")
@@ -1026,9 +1433,13 @@ class MainWindow(QMainWindow):
         selected_count = sum(1 for card in self.vectorizer_cards if isinstance(card, ImageCard) and card.checkbox.isChecked())
         cards = [c for c in self.vectorizer_cards if isinstance(c, ImageCard)]
         if cards and selected_count == len(cards):
-            self.vec_btn_select_all.setText("Deselect All")
+            self.vec_btn_select_all.blockSignals(True)
+            self.vec_btn_select_all.setChecked(True)
+            self.vec_btn_select_all.blockSignals(False)
         else:
-            self.vec_btn_select_all.setText("Select All")
+            self.vec_btn_select_all.blockSignals(True)
+            self.vec_btn_select_all.setChecked(False)
+            self.vec_btn_select_all.blockSignals(False)
             
         if selected_count > 0:
             self.vec_btn_batch.setText(f"Vectorize Selected ({selected_count})")
@@ -1044,9 +1455,13 @@ class MainWindow(QMainWindow):
         selected_count = sum(1 for card in self.restoration_cards if isinstance(card, ImageCard) and card.checkbox.isChecked())
         cards = [c for c in self.restoration_cards if isinstance(c, ImageCard)]
         if cards and selected_count == len(cards):
-            self.rest_btn_select_all.setText("Deselect All")
+            self.rest_btn_select_all.blockSignals(True)
+            self.rest_btn_select_all.setChecked(True)
+            self.rest_btn_select_all.blockSignals(False)
         else:
-            self.rest_btn_select_all.setText("Select All")
+            self.rest_btn_select_all.blockSignals(True)
+            self.rest_btn_select_all.setChecked(False)
+            self.rest_btn_select_all.blockSignals(False)
             
         if selected_count > 0:
             self.rest_btn_batch.setText(f"Restore Selected ({selected_count})")
@@ -1055,41 +1470,136 @@ class MainWindow(QMainWindow):
             self.rest_btn_batch.setText("Select items to restore")
             self.rest_btn_batch.setEnabled(False)
             
-    def select_all_bg(self):
-        cards = [c for c in self.bg_cards if isinstance(c, ImageCard)]
-        if not cards:
+    
+
+    def has_active_selections_vid(self):
+        return any(card.checkbox.isChecked() for card in self.vid_cards if isinstance(card, ImageCard))
+        
+    def update_batch_button_vid(self):
+        selected_count = sum(1 for card in self.vid_cards if isinstance(card, ImageCard) and card.checkbox.isChecked())
+        cards = [c for c in self.vid_cards if isinstance(c, ImageCard)]
+        if cards and selected_count == len(cards):
+            self.vid_btn_select_all.blockSignals(True)
+            self.vid_btn_select_all.setChecked(True)
+            self.vid_btn_select_all.blockSignals(False)
+        else:
+            self.vid_btn_select_all.blockSignals(True)
+            self.vid_btn_select_all.setChecked(False)
+            self.vid_btn_select_all.blockSignals(False)
+            
+        if selected_count > 0:
+            self.vid_btn_batch.setText(f"Convert Selected ({selected_count})")
+            self.vid_btn_batch.setEnabled(True)
+        else:
+            self.vid_btn_batch.setText("Select items to convert")
+            self.vid_btn_batch.setEnabled(False)
+
+    def filter_vid_grid(self, text):
+        text = text.lower()
+        for card in self.vid_cards:
+            if isinstance(card, ImageCard):
+                import os
+                card.setVisible(text in os.path.basename(str(card.file_path)).lower())
+        self.update_batch_button_vid()
+
+    def select_all_vid(self):
+        cards = [c for c in self.vid_cards if isinstance(c, ImageCard) and c.isVisible()]
+        if not cards: return
+        target_state = self.vid_btn_select_all.isChecked()
+        for c in cards: c.checkbox.setChecked(target_state)
+
+    def on_card_clicked_vid(self, file_path):
+        self.set_status(f"Selected for Video Conversion: {os.path.basename(file_path)}")
+        
+        confirm = VideoConvertConfirmDialog(file_path, self)
+        if confirm.exec() == QDialog.Accepted:
+            params = confirm.get_settings()
+            
+            self.active_tool = 'vid'
+            self.vid_params = params
+            
+            self.batch_queue = [file_path]
+            self.batch_results = []
+            self.batch_total = 1
+            self.process_next_batch_item()
+
+    def on_process_selected_vid(self):
+        selected_cards = [card for card in self.vid_cards if isinstance(card, ImageCard) and card.checkbox.isChecked()]
+        if not selected_cards:
             return
-        all_checked = all(c.checkbox.isChecked() for c in cards)
-        target_state = not all_checked
-        for c in cards:
-            c.checkbox.setChecked(target_state)
+            
+        confirm = BatchVideoConvertConfirmDialog(len(selected_cards), self)
+        if confirm.exec() == QDialog.Accepted:
+            params = confirm.get_settings()
+            
+            self.active_tool = 'vid'
+            self.vid_params = params
+            
+            self.batch_queue = [card.file_path for card in selected_cards]
+            self.batch_results = []
+            self.batch_total = len(self.batch_queue)
+            
+            # Clear selections
+            for card in selected_cards:
+                card.checkbox.setChecked(False)
+            
+            self.process_next_batch_item()
+
+    def filter_bg_grid(self, text):
+        text = text.lower()
+        for card in self.bg_cards:
+            if isinstance(card, ImageCard):
+                import os
+                card.setVisible(text in os.path.basename(str(card.file_path)).lower())
+        self.update_batch_button_bg()
+
+    def filter_up_grid(self, text):
+        text = text.lower()
+        for card in self.upscaler_cards:
+            if isinstance(card, ImageCard):
+                import os
+                card.setVisible(text in os.path.basename(str(card.file_path)).lower())
+        self.update_batch_button_upscaler()
+
+    def filter_vec_grid(self, text):
+        text = text.lower()
+        for card in self.vectorizer_cards:
+            if isinstance(card, ImageCard):
+                import os
+                card.setVisible(text in os.path.basename(str(card.file_path)).lower())
+        self.update_batch_button_vectorizer()
+
+    def filter_rest_grid(self, text):
+        text = text.lower()
+        for card in self.restoration_cards:
+            if isinstance(card, ImageCard):
+                import os
+                card.setVisible(text in os.path.basename(str(card.file_path)).lower())
+        self.update_batch_button_restoration()
+
+    def select_all_bg(self):
+        cards = [c for c in self.bg_cards if isinstance(c, ImageCard) and c.isVisible()]
+        if not cards: return
+        target_state = self.bg_btn_select_all.isChecked()
+        for c in cards: c.checkbox.setChecked(target_state)
 
     def select_all_upscaler(self):
-        cards = [c for c in self.upscaler_cards if isinstance(c, ImageCard)]
-        if not cards:
-            return
-        all_checked = all(c.checkbox.isChecked() for c in cards)
-        target_state = not all_checked
-        for c in cards:
-            c.checkbox.setChecked(target_state)
+        cards = [c for c in self.upscaler_cards if isinstance(c, ImageCard) and c.isVisible()]
+        if not cards: return
+        target_state = self.up_btn_select_all.isChecked()
+        for c in cards: c.checkbox.setChecked(target_state)
 
     def select_all_vectorizer(self):
-        cards = [c for c in self.vectorizer_cards if isinstance(c, ImageCard)]
-        if not cards:
-            return
-        all_checked = all(c.checkbox.isChecked() for c in cards)
-        target_state = not all_checked
-        for c in cards:
-            c.checkbox.setChecked(target_state)
+        cards = [c for c in self.vectorizer_cards if isinstance(c, ImageCard) and c.isVisible()]
+        if not cards: return
+        target_state = self.vec_btn_select_all.isChecked()
+        for c in cards: c.checkbox.setChecked(target_state)
 
     def select_all_restoration(self):
-        cards = [c for c in self.restoration_cards if isinstance(c, ImageCard)]
-        if not cards:
-            return
-        all_checked = all(c.checkbox.isChecked() for c in cards)
-        target_state = not all_checked
-        for c in cards:
-            c.checkbox.setChecked(target_state)
+        cards = [c for c in self.restoration_cards if isinstance(c, ImageCard) and c.isVisible()]
+        if not cards: return
+        target_state = self.rest_btn_select_all.isChecked()
+        for c in cards: c.checkbox.setChecked(target_state)
 
     def load_directories(self, directories):
         self.current_dirs = directories
@@ -1114,98 +1624,160 @@ class MainWindow(QMainWindow):
             for card in self.restoration_cards:
                 card.deleteLater()
         self.restoration_cards = []
+
+        if hasattr(self, 'vid_cards'):
+            for card in self.vid_cards:
+                card.deleteLater()
+        self.vid_cards = []
         
-        valid_extensions = {'.png', '.jpg', '.jpeg', '.webp', '.bmp'}
-        image_paths = []
+        if hasattr(self, 'crop_cards'):
+            for card in self.crop_cards:
+                card.deleteLater()
+        self.crop_cards = []
+        self.icon_cards = []
+        self.meta_cards = []
+        
+        img_exts = {'.png', '.jpg', '.jpeg', '.webp', '.bmp'}
+        vid_exts = {'.mp4', '.webm', '.avi', '.mov', '.mkv', '.gif'}
+        
+        photo_paths = []
+        video_paths = []
         
         for path in directories:
             try:
                 if os.path.exists(path) and os.path.isdir(path):
                     files = os.listdir(path)
                     for f in files:
-                        if os.path.splitext(f)[1].lower() in valid_extensions:
+                        ext = os.path.splitext(f)[1].lower()
+                        if ext in img_exts:
                             full_path = os.path.join(path, f)
-                            if full_path not in image_paths:
-                                image_paths.append(full_path)
+                            if full_path not in photo_paths:
+                                photo_paths.append(full_path)
+                        elif ext in vid_exts:
+                            full_path = os.path.join(path, f)
+                            if full_path not in video_paths:
+                                video_paths.append(full_path)
             except Exception as e:
                 print(f"Error reading path {path}: {e}")
                 
-        image_paths.sort(key=lambda x: os.path.basename(x).lower())
+        photo_paths.sort(key=lambda x: os.path.basename(x).lower())
+        video_paths.sort(key=lambda x: os.path.basename(x).lower())
         
-        self.items_count_label.setText(f"Items: {len(image_paths)}")
+        self.items_count_label.setText(f"Items: {len(photo_paths) + len(video_paths)}")
         
-        if not image_paths:
+        if not photo_paths:
             self.bg_batch_row.setVisible(False)
             self.up_batch_row.setVisible(False)
             self.vec_batch_row.setVisible(False)
             self.rest_batch_row.setVisible(False)
-            no_images_label_bg = QLabel("No images found in the scanned directories.", self.bg_scroll_widget)
-            no_images_label_bg.setStyleSheet("color: #64748b; font-size: 14px; font-style: italic; margin-top: 50px;")
+            self.crop_batch_row.setVisible(False)
+            
+            no_images_label_bg = QLabel("no photos", self.bg_scroll_widget)
+            no_images_label_bg.setStyleSheet("color: {text_muted}; font-size: 14px; font-style: italic; margin-top: 50px;".format(**_get_tc()))
             no_images_label_bg.setAlignment(Qt.AlignCenter)
             self.bg_grid_layout.addWidget(no_images_label_bg, 0, 0, 1, -1)
             self.bg_cards.append(no_images_label_bg)
             
-            no_images_label_up = QLabel("No images found in the scanned directories.", self.up_scroll_widget)
-            no_images_label_up.setStyleSheet("color: #64748b; font-size: 14px; font-style: italic; margin-top: 50px;")
+            no_images_label_up = QLabel("no photos", self.up_scroll_widget)
+            no_images_label_up.setStyleSheet("color: {text_muted}; font-size: 14px; font-style: italic; margin-top: 50px;".format(**_get_tc()))
             no_images_label_up.setAlignment(Qt.AlignCenter)
             self.up_grid_layout.addWidget(no_images_label_up, 0, 0, 1, -1)
             self.upscaler_cards.append(no_images_label_up)
             
-            no_images_label_vec = QLabel("No images found in the scanned directories.", self.vec_scroll_widget)
-            no_images_label_vec.setStyleSheet("color: #64748b; font-size: 14px; font-style: italic; margin-top: 50px;")
+            no_images_label_vec = QLabel("no photos", self.vec_scroll_widget)
+            no_images_label_vec.setStyleSheet("color: {text_muted}; font-size: 14px; font-style: italic; margin-top: 50px;".format(**_get_tc()))
             no_images_label_vec.setAlignment(Qt.AlignCenter)
             self.vec_grid_layout.addWidget(no_images_label_vec, 0, 0, 1, -1)
             self.vectorizer_cards.append(no_images_label_vec)
             
-            no_images_label_rest = QLabel("No images found in the scanned directories.", self.rest_scroll_widget)
-            no_images_label_rest.setStyleSheet("color: #64748b; font-size: 14px; font-style: italic; margin-top: 50px;")
+            no_images_label_rest = QLabel("no photos", self.rest_scroll_widget)
+            no_images_label_rest.setStyleSheet("color: {text_muted}; font-size: 14px; font-style: italic; margin-top: 50px;".format(**_get_tc()))
             no_images_label_rest.setAlignment(Qt.AlignCenter)
             self.rest_grid_layout.addWidget(no_images_label_rest, 0, 0, 1, -1)
             self.restoration_cards.append(no_images_label_rest)
-            
-            self.set_status("Scan completed. No images found.")
-            return
-            
-        for img_path in image_paths:
-            # Cards for BG Remover
-            card_bg = ImageCard(img_path, self)
-            card_bg.card_type = 'bg'
-            card_bg.clicked.connect(self.on_card_clicked_bg)
-            card_bg.selection_changed.connect(self.update_batch_button_bg)
-            self.bg_cards.append(card_bg)
-            
-            # Cards for Upscaler
-            card_up = ImageCard(img_path, self)
-            card_up.card_type = 'up'
-            card_up.clicked.connect(self.on_card_clicked_upscaler)
-            card_up.selection_changed.connect(self.update_batch_button_upscaler)
-            self.upscaler_cards.append(card_up)
-            
-            # Cards for Vectorizer
-            card_vec = ImageCard(img_path, self)
-            card_vec.card_type = 'vec'
-            card_vec.clicked.connect(self.on_card_clicked_vectorizer)
-            card_vec.selection_changed.connect(self.update_batch_button_vectorizer)
-            self.vectorizer_cards.append(card_vec)
-            
-            # Cards for Restoration
-            card_rest = ImageCard(img_path, self)
-            card_rest.card_type = 'rest'
-            card_rest.clicked.connect(self.on_card_clicked_restoration)
-            card_rest.selection_changed.connect(self.update_batch_button_restoration)
-            self.restoration_cards.append(card_rest)
-            
+        else:
+            for img_path in photo_paths:
+                card_bg = ImageCard(img_path, self)
+                card_bg.card_type = 'bg'
+                card_bg.clicked.connect(self.on_card_clicked_bg)
+                card_bg.selection_changed.connect(self.update_batch_button_bg)
+                self.bg_cards.append(card_bg)
+                
+                card_up = ImageCard(img_path, self)
+                card_up.card_type = 'up'
+                card_up.clicked.connect(self.on_card_clicked_upscaler)
+                card_up.selection_changed.connect(self.update_batch_button_upscaler)
+                self.upscaler_cards.append(card_up)
+                
+                card_vec = ImageCard(img_path, self)
+                card_vec.card_type = 'vec'
+                card_vec.clicked.connect(self.on_card_clicked_vectorizer)
+                card_vec.selection_changed.connect(self.update_batch_button_vectorizer)
+                self.vectorizer_cards.append(card_vec)
+                
+                card_rest = ImageCard(img_path, self)
+                card_rest.card_type = 'rest'
+                card_rest.clicked.connect(self.on_card_clicked_restoration)
+                card_rest.selection_changed.connect(self.update_batch_button_restoration)
+                self.restoration_cards.append(card_rest)
+                
+                card_crop = ImageCard(img_path, self)
+                card_crop.card_type = 'crop'
+                card_crop.clicked.connect(self.on_card_clicked_crop)
+                card_crop.selection_changed.connect(self.update_batch_button_crop)
+                self.crop_cards.append(card_crop)
+                card_icon = ImageCard(img_path, self)
+                card_icon.card_type = 'icon'
+                card_icon.clicked.connect(self.on_card_clicked_icon)
+                card_icon.selection_changed.connect(self.update_batch_button_icon)
+                self.icon_cards.append(card_icon)
+                card_meta = ImageCard(img_path, self)
+                card_meta.card_type = 'meta'
+                card_meta.clicked.connect(self.on_card_clicked_meta)
+                card_meta.selection_changed.connect(self.update_batch_button_meta)
+                self.meta_cards.append(card_meta)
+                
+        if not video_paths:
+            self.vid_batch_row.setVisible(False)
+            no_videos_label = QLabel("no videos", self.vid_scroll_widget)
+            no_videos_label.setStyleSheet("color: {text_muted}; font-size: 14px; font-style: italic; margin-top: 50px;".format(**_get_tc()))
+            no_videos_label.setAlignment(Qt.AlignCenter)
+            self.vid_grid_layout.addWidget(no_videos_label, 0, 0, 1, -1)
+            self.vid_cards.append(no_videos_label)
+        else:
+            for vid_path in video_paths:
+                card_vid = ImageCard(vid_path, self)
+                card_vid.card_type = 'vid'
+                card_vid.clicked.connect(self.on_card_clicked_vid)
+                card_vid.selection_changed.connect(self.update_batch_button_vid)
+                self.vid_cards.append(card_vid)
+
         self.populate_grid()
-        if image_paths:
+        
+        if photo_paths:
             self.bg_batch_row.setVisible(True)
             self.up_batch_row.setVisible(True)
             self.vec_batch_row.setVisible(True)
             self.rest_batch_row.setVisible(True)
+            self.crop_batch_row.setVisible(True)
+            self.icon_batch_row.setVisible(True)
+            self.meta_batch_row.setVisible(True)
             self.update_batch_button_bg()
             self.update_batch_button_upscaler()
             self.update_batch_button_vectorizer()
             self.update_batch_button_restoration()
-        self.set_status(f"Scan completed. Loaded {len(image_paths)} images.")
+            self.update_batch_button_crop()
+            self.update_batch_button_icon()
+            self.update_batch_button_meta()
+            
+        if video_paths:
+            self.vid_batch_row.setVisible(True)
+            self.update_batch_button_vid()
+            
+        if not photo_paths and not video_paths:
+            self.set_status("Scan completed. no photos or videos.")
+        else:
+            self.set_status(f"Scan completed. Loaded {len(photo_paths)} photos and {len(video_paths)} videos.")
         
     def populate_grid(self):
         # Clear BG grid
@@ -1233,6 +1805,34 @@ class MainWindow(QMainWindow):
                 item = self.rest_grid_layout.itemAt(idx)
                 if item:
                     self.rest_grid_layout.removeItem(item)
+                    
+        # Clear Video grid
+        if hasattr(self, 'vid_grid_layout'):
+            for idx in range(self.vid_grid_layout.count()):
+                item = self.vid_grid_layout.itemAt(idx)
+                if item:
+                    self.vid_grid_layout.removeItem(item)
+                    
+        # Clear Meta grid
+        if hasattr(self, 'meta_grid_layout'):
+            for idx in range(self.meta_grid_layout.count()):
+                item = self.meta_grid_layout.itemAt(idx)
+                if item:
+                    self.meta_grid_layout.removeItem(item)
+
+        # Clear Icon grid
+        if hasattr(self, 'icon_grid_layout'):
+            for idx in range(self.icon_grid_layout.count()):
+                item = self.icon_grid_layout.itemAt(idx)
+                if item:
+                    self.icon_grid_layout.removeItem(item)
+
+        # Clear Crop grid
+        if hasattr(self, 'crop_grid_layout'):
+            for idx in range(self.crop_grid_layout.count()):
+                item = self.crop_grid_layout.itemAt(idx)
+                if item:
+                    self.crop_grid_layout.removeItem(item)
                 
         active_scroll = self.bg_scroll_area
         if hasattr(self, 'tabs'):
@@ -1246,8 +1846,18 @@ class MainWindow(QMainWindow):
             elif idx == 3:
                 active_scroll = self.rest_scroll_area
             elif idx == 4:
-                # Google Fonts tab has no image cards grid, we do not need cards formatting here
-                return
+                if hasattr(self, 'vid_scroll_area'):
+                    active_scroll = self.vid_scroll_area
+            else:
+                tab_text = self.tabs.tabText(idx)
+                if tab_text == "Smart Crop" and hasattr(self, 'crop_scroll_area'):
+                    active_scroll = self.crop_scroll_area
+                elif tab_text == "Favicon Gen" and hasattr(self, 'icon_scroll_area'):
+                    active_scroll = self.icon_scroll_area
+                elif tab_text == "Metadata" and hasattr(self, 'meta_scroll_area'):
+                    active_scroll = self.meta_scroll_area
+                else:
+                    active_scroll = self.bg_scroll_area
                 
         scroll_width = active_scroll.viewport().width()
         # Fallback to absolute sizing if layout calculations have not completed yet
@@ -1284,6 +1894,34 @@ class MainWindow(QMainWindow):
                 row = idx // cols
                 col = idx % cols
                 self.rest_grid_layout.addWidget(card, row, col)
+                
+        # Populate Grid for Video
+        if hasattr(self, 'vid_cards') and hasattr(self, 'vid_grid_layout'):
+            for idx, card in enumerate(self.vid_cards):
+                row = idx // cols
+                col = idx % cols
+                self.vid_grid_layout.addWidget(card, row, col)
+                
+        # Populate Grid for Crop
+        if hasattr(self, 'crop_cards') and hasattr(self, 'crop_grid_layout'):
+            for idx, card in enumerate(self.crop_cards):
+                row = idx // cols
+                col = idx % cols
+                self.crop_grid_layout.addWidget(card, row, col)
+                
+        # Populate Grid for Icon
+        if hasattr(self, 'icon_cards') and hasattr(self, 'icon_grid_layout'):
+            for idx, card in enumerate(self.icon_cards):
+                row = idx // cols
+                col = idx % cols
+                self.icon_grid_layout.addWidget(card, row, col)
+                
+        # Populate Grid for Meta
+        if hasattr(self, 'meta_cards') and hasattr(self, 'meta_grid_layout'):
+            for idx, card in enumerate(self.meta_cards):
+                row = idx // cols
+                col = idx % cols
+                self.meta_grid_layout.addWidget(card, row, col)
             
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -1313,14 +1951,29 @@ class MainWindow(QMainWindow):
             self.set_status("Settings updated successfully.")
             
     def on_refresh(self):
-        self.load_directories(self.current_dirs)
+        current_widget = self.tabs.currentWidget()
+        if current_widget == getattr(self, "fonts_tab", None):
+            self.fetch_fonts_catalog()
+        elif current_widget == getattr(self, "myinstants_tab", None):
+            self.myinstants_tab.retry_last_action()
+        else:
+            self.load_directories(self.current_dirs)
+            
+    def on_clean_duplicates(self):
+        if not hasattr(self, 'photo_paths') or not self.photo_paths:
+            self.show_toast("No images found in the active folder.", "error")
+            return
+            
+        dlg = DuplicateCleanerDialog(self.photo_paths, self)
+        if dlg.exec() == QDialog.Accepted:
+            self.load_directories(self.current_dirs)
 
     def _find_cards_for_path(self, file_path: str) -> list:
         """Return every ImageCard across all tabs whose file_path matches."""
         norm = os.path.normcase(file_path)
         matches = []
         for card_list in (self.bg_cards, self.upscaler_cards,
-                          self.vectorizer_cards, self.restoration_cards):
+                          self.vectorizer_cards, self.restoration_cards, self.crop_cards, self.icon_cards, self.meta_cards):
             for card in card_list:
                 if isinstance(card, ImageCard) and os.path.normcase(card.file_path) == norm:
                     matches.append(card)
@@ -1365,11 +2018,11 @@ class MainWindow(QMainWindow):
     # Context menu actions on Empty Grid Space
     def show_grid_context_menu(self, position):
         menu = QMenu(self)
-        menu.setStyleSheet("""
-            QMenu { background-color: #1a1a20; color: #e2e8f0; border: 1px solid #374151; border-radius: 6px; padding: 4px; }
-            QMenu::item { padding: 6px 20px; border-radius: 4px; }
-            QMenu::item:selected { background-color: #6366f1; color: #ffffff; }
-        """)
+        menu.setStyleSheet(
+            "QMenu {{ background-color: {menu_bg}; color: {text}; border: 1px solid {scrollbar_handle}; border-radius: 6px; padding: 4px; }}"
+            " QMenu::item {{ padding: 6px 20px; border-radius: 4px; }}"
+            " QMenu::item:selected {{ background-color: {accent}; color: {text_bright}; }}".format(**_get_tc())
+        )
         
         act_paste = menu.addAction("Paste")
         clipboard = QApplication.clipboard()
@@ -1664,6 +2317,8 @@ class MainWindow(QMainWindow):
                             self.show_toast(f"Failed to save SVG: {str(e)}", 'error')
                     else:
                         self.set_status("Changes discarded.")
+                        if getattr(comp_dlg, 'action_selected', None) == 'discard':
+                            QTimer.singleShot(100, lambda fp=res['file_path']: self.on_card_clicked_vectorizer(fp))
                     self.load_directories(self.current_dirs)
                 else:
                     comp_dlg = ComparisonDialog(res['file_path'], res['pil_img'], self)
@@ -1671,6 +2326,19 @@ class MainWindow(QMainWindow):
                         self.apply_changes(comp_dlg.action_selected, res['file_path'], res['pil_img'], comp_dlg.save_path)
                     else:
                         self.set_status("Changes discarded.")
+                        if getattr(comp_dlg, 'action_selected', None) == 'discard':
+                            if self.active_tool == 'bg_remover':
+                                QTimer.singleShot(100, lambda fp=res['file_path']: self.on_card_clicked_bg(fp))
+                            elif self.active_tool == 'upscaler':
+                                QTimer.singleShot(100, lambda fp=res['file_path']: self.on_card_clicked_upscaler(fp))
+                            elif self.active_tool == 'restoration':
+                                QTimer.singleShot(100, lambda fp=res['file_path']: self.on_card_clicked_restoration(fp))
+                            elif self.active_tool == 'vid_converter':
+                                QTimer.singleShot(100, lambda fp=res['file_path']: self.on_card_clicked_vid(fp))
+                            elif self.active_tool == 'icon' or self.active_tool == 'meta':
+                                pass
+                            elif self.active_tool == 'crop':
+                                QTimer.singleShot(100, lambda fp=res['file_path']: self.on_card_clicked_crop(fp))
                     self.load_directories(self.current_dirs)
             else:
                 if self.active_tool == 'vectorizer':
@@ -1696,7 +2364,8 @@ class MainWindow(QMainWindow):
         if self.active_tool == 'bg_remover':
             model_name = self.settings.get("model_name", "u2net")
             filename = MODEL_FILENAMES.get(model_name, "u2net.onnx")
-            model_path = os.path.join(os.path.expanduser("~/.u2net"), filename)
+            model_path = os.path.join(get_app_data_dir(), "models", "u2net", filename)
+            os.makedirs(os.path.dirname(model_path), exist_ok=True)
             
             if not os.path.exists(model_path):
                 self.loading_dlg.start_download_mode(model_name)
@@ -1721,7 +2390,8 @@ class MainWindow(QMainWindow):
                 exe_path = self.get_realesrgan_exe()
                 if not exe_path:
                     zip_filename = "realesrgan-ncnn-vulkan-20220424-windows.zip"
-                    dest_zip = os.path.join(os.path.expanduser("~/.realesrgan"), zip_filename)
+                    dest_zip = os.path.join(get_app_data_dir(), "models", "realesrgan", zip_filename)
+                    os.makedirs(os.path.dirname(dest_zip), exist_ok=True)
                     
                     self.loading_dlg.start_download_mode(zip_filename)
                     self.set_status("Downloading Real-ESRGAN engine...")
@@ -1736,7 +2406,8 @@ class MainWindow(QMainWindow):
                     self.start_batch_upscale_worker(file_path, current_num)
             else:
                 model_filename = f"{model_name.upper()}_x{scale}.pb"
-                model_path = os.path.join(os.path.expanduser("~/.opencv_superres"), model_filename)
+                model_path = os.path.join(get_app_data_dir(), "models", "opencv_superres", model_filename)
+                os.makedirs(os.path.dirname(model_path), exist_ok=True)
                 
                 if not os.path.exists(model_path):
                     self.loading_dlg.start_download_mode(model_filename)
@@ -1759,7 +2430,8 @@ class MainWindow(QMainWindow):
         elif self.active_tool == 'restoration':
             method = self.restoration_params.get("method", "nlmeans")
             if method == "dncnn":
-                model_dir = os.path.expanduser("~/.opencv_restoration")
+                model_dir = os.path.join(get_app_data_dir(), "models", "opencv_restoration")
+                os.makedirs(model_dir, exist_ok=True)
                 model_path = os.path.join(model_dir, "dncnn_color_est.onnx")
                 self.restoration_params["model_path"] = model_path
                 
@@ -1776,9 +2448,37 @@ class MainWindow(QMainWindow):
                     self.start_batch_restoration_worker(file_path, current_num)
             else:
                 self.start_batch_restoration_worker(file_path, current_num)
+
+        elif self.active_tool == 'meta':
+            self.start_batch_meta_worker(file_path, current_num)
+        elif self.active_tool == 'icon':
+            self.start_batch_icon_worker(file_path, current_num)
+        elif self.active_tool == 'crop':
+            self.start_batch_crop_worker(file_path, current_num)
+        elif self.active_tool == 'vid':
+            worker = VideoConvertWorker(
+                file_path,
+                out_format=self.vid_params.get("out_format", "gif"),
+                fps=self.vid_params.get("fps", 15),
+                scale=self.vid_params.get("scale", "320:-1"),
+                dither=self.vid_params.get("dither", "none")
+            )
+            worker.finished.connect(self.on_single_vid_finished)
+            # Find card
+            for card in self.vid_cards:
+                if isinstance(card, ImageCard) and card.file_path == file_path:
+                    card.set_processing(True)
+                    break
+            
+            if hasattr(self, 'loading_dlg') and self.loading_dlg.isVisible():
+                self.loading_dlg.set_progress(f"Converting {os.path.basename(file_path)}...", current_num, self.batch_total)
+                
+            worker.start()
+            # keep reference
+            self.current_worker = worker
                     
     def get_realesrgan_exe(self):
-        realesrgan_dir = os.path.expanduser("~/.realesrgan")
+        realesrgan_dir = os.path.join(get_app_data_dir(), "models", "realesrgan")
         return find_realesrgan_exe(realesrgan_dir)
         
     def on_realesrgan_download_finished(self, success, error_message, zip_path, file_path, current_num):
@@ -1795,7 +2495,7 @@ class MainWindow(QMainWindow):
         self.set_status("Extracting Real-ESRGAN engine...")
         try:
             import zipfile
-            realesrgan_dir = os.path.expanduser("~/.realesrgan")
+            realesrgan_dir = os.path.join(get_app_data_dir(), "models", "realesrgan")
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                 zip_ref.extractall(realesrgan_dir)
             
@@ -1874,6 +2574,7 @@ class MainWindow(QMainWindow):
         else:
             print(f"Error processing {file_path}: {error_message}")
             self.set_status(f"Failed to process: {os.path.basename(file_path)}")
+            QMessageBox.critical(self, "Processing Error", f"Error processing {os.path.basename(file_path)}:\n\n{error_message}")
             
         self.process_next_batch_item()
         
@@ -1910,6 +2611,7 @@ class MainWindow(QMainWindow):
         else:
             print(f"Error vectorizing {file_path}: {error_message}")
             self.set_status(f"Failed to vectorize: {os.path.basename(file_path)}")
+            QMessageBox.critical(self, "Vectorizer Error", f"Error vectorizing {os.path.basename(file_path)}:\n\n{error_message}")
             
         self.process_next_batch_item()
         
@@ -1975,6 +2677,7 @@ class MainWindow(QMainWindow):
         else:
             print(f"Error upscaling {file_path}: {error_message}")
             self.set_status(f"Failed to upscale: {os.path.basename(file_path)}")
+            QMessageBox.critical(self, "Upscale Error", f"Error upscaling {os.path.basename(file_path)}:\n\n{error_message}")
             
         self.process_next_batch_item()
         
@@ -2018,6 +2721,7 @@ class MainWindow(QMainWindow):
         else:
             print(f"Error restoring {file_path}: {error_message}")
             self.set_status(f"Failed to restore: {os.path.basename(file_path)}")
+            QMessageBox.critical(self, "Restoration Error", f"Error restoring {os.path.basename(file_path)}:\n\n{error_message}")
             
         self.process_next_batch_item()
         
@@ -2049,6 +2753,11 @@ class MainWindow(QMainWindow):
                     save_fmt = 'PNG' if ext == '.png' else ('JPEG' if ext in ['.jpg', '.jpeg'] else 'PNG')
                     pil_img.save(save_path, save_fmt)
                     self.set_status(f"Saved restored copy: {os.path.basename(save_path)}")
+                elif self.active_tool == 'crop':
+                    save_path = os.path.join(dir_name, f"{base_name}_cropped{ext}")
+                    save_fmt = 'PNG' if ext == '.png' else ('JPEG' if ext in ['.jpg', '.jpeg'] else 'PNG')
+                    pil_img.save(save_path, save_fmt)
+                    self.set_status(f"Saved cropped copy: {os.path.basename(save_path)}")
                 else:
                     save_path = os.path.join(dir_name, f"{base_name}_upscaled{ext}")
                     save_fmt = 'PNG' if ext == '.png' else ('JPEG' if ext in ['.jpg', '.jpeg'] else 'PNG')
@@ -2099,6 +2808,7 @@ class MainWindow(QMainWindow):
             self.populate_grid()
 
     def fetch_fonts_catalog(self):
+        self.fonts_stacked_widget.setCurrentWidget(self.fonts_loading_widget)
         class CatalogLoader(QThread):
             loaded = Signal(list, bool)
             def run(self):
@@ -2118,7 +2828,17 @@ class MainWindow(QMainWindow):
 
     @Slot(list, bool)
     def on_fonts_catalog_loaded(self, font_list, success):
-        # Fallback catalog in case the application is run offline
+        if success:
+            self.fonts_catalog = font_list
+            self.set_status(f"Successfully loaded {len(self.fonts_catalog)} Google fonts from API.")
+            self.fonts_stacked_widget.setCurrentWidget(self.fonts_table_widget)
+            self.populate_fonts_list()
+        else:
+            self.fonts_error_label.setText("Failed to connect to Google Fonts API.")
+            self.fonts_stacked_widget.setCurrentWidget(self.fonts_error_widget)
+            self.set_status("Failed to load Google Fonts API.")
+
+    def load_fallback_fonts(self):
         FALLBACK_FONTS = [
             {"id": "roboto", "family": "Roboto", "category": "sans-serif", "variants": ["regular", "italic", "300", "700"]},
             {"id": "open-sans", "family": "Open Sans", "category": "sans-serif", "variants": ["regular", "italic", "600", "700"]},
@@ -2148,13 +2868,9 @@ class MainWindow(QMainWindow):
             {"id": "great-vibes", "family": "Great Vibes", "category": "handwriting", "variants": ["regular"]},
             {"id": "caveat", "family": "Caveat", "category": "handwriting", "variants": ["regular", "700"]}
         ]
-        if success:
-            self.fonts_catalog = font_list
-            self.set_status(f"Successfully loaded {len(self.fonts_catalog)} Google fonts from API.")
-        else:
-            self.fonts_catalog = FALLBACK_FONTS
-            self.set_status("Loaded fallback fonts (API offline).")
-            
+        self.fonts_catalog = FALLBACK_FONTS
+        self.set_status("Loaded fallback fonts (API offline).")
+        self.fonts_stacked_widget.setCurrentWidget(self.fonts_table_widget)
         self.populate_fonts_list()
 
     def populate_fonts_list(self):
@@ -2178,6 +2894,7 @@ class MainWindow(QMainWindow):
         
         self.fonts_table_widget.setUpdatesEnabled(False)
         self.fonts_table_widget.blockSignals(True)
+        self.fonts_table_widget.setSortingEnabled(False)
         
         for i in range(self._fonts_current_populate_index, end_idx):
             font = self.fonts_catalog[i]
@@ -2208,6 +2925,7 @@ class MainWindow(QMainWindow):
             
             self.fonts_items.append((family_item, font))
             
+        self.fonts_table_widget.setSortingEnabled(True)
         self.fonts_table_widget.blockSignals(False)
         self.fonts_table_widget.setUpdatesEnabled(True)
         
@@ -2587,11 +3305,11 @@ class MainWindow(QMainWindow):
             return
 
         menu = QMenu(self)
-        menu.setStyleSheet("""
-            QMenu { background-color: #1a1a20; color: #e2e8f0; border: 1px solid #374151; border-radius: 6px; padding: 4px; }
-            QMenu::item { padding: 6px 20px; border-radius: 4px; }
-            QMenu::item:selected { background-color: #6366f1; color: #ffffff; }
-        """)
+        menu.setStyleSheet(
+            "QMenu {{ background-color: {menu_bg}; color: {text}; border: 1px solid {scrollbar_handle}; border-radius: 6px; padding: 4px; }}"
+            " QMenu::item {{ padding: 6px 20px; border-radius: 4px; }}"
+            " QMenu::item:selected {{ background-color: {accent}; color: {text_bright}; }}".format(**_get_tc())
+        )
 
         action_info = menu.addAction("Show Info")
         is_checked = font_id in self.fonts_selected_ids
@@ -3016,3 +3734,292 @@ class MainWindow(QMainWindow):
         self._single_install_worker = None
         self._single_install_dir = None
 
+
+
+    def on_single_vid_finished(self, success, out_path, error_msg):
+        # Find active card
+        current_path = ""
+        if hasattr(self, 'batch_queue') and self.batch_total > len(self.batch_queue):
+            current_idx = self.batch_total - len(self.batch_queue) - 1
+            if current_idx >= 0 and current_idx < len(self.batch_results) + 1:
+                # We need to find the card that was just processed
+                for card in self.vid_cards:
+                    if isinstance(card, ImageCard) and getattr(card, '_spinner', None) and card._spinner.isVisible():
+                        if success:
+                            card.set_processing(False)
+                        else:
+                            card.set_error()
+                        break
+
+        if success:
+            self.batch_results.append({'file_path': out_path})
+        else:
+            self.show_toast(f"Error: {error_msg}", 'error')
+
+        if not self.batch_queue:
+            if hasattr(self, 'loading_dlg') and self.loading_dlg.isVisible():
+                self.loading_dlg.close()
+            self.show_toast(f"Converted {len(self.batch_results)} videos.", 'success')
+            self.load_directories(self.current_dirs)
+        else:
+            self.process_next_batch_item()
+
+    def filter_crop_grid(self, text):
+        query = text.lower()
+        for card in self.crop_cards:
+            if isinstance(card, ImageCard):
+                filename = os.path.basename(card.file_path).lower()
+                card.setVisible(query in filename)
+                
+    def select_all_crop(self):
+        is_checked = self.crop_btn_select_all.isChecked()
+        for card in self.crop_cards:
+            if isinstance(card, ImageCard) and card.isVisible():
+                card.checkbox.setChecked(is_checked)
+        self.update_batch_button_crop()
+    def update_batch_button_crop(self):
+        if not hasattr(self, 'crop_cards'): return
+        selected_count = sum(1 for card in self.crop_cards if isinstance(card, ImageCard) and card.checkbox.isChecked())
+        cards = [c for c in self.crop_cards if isinstance(c, ImageCard)]
+        if not cards: return
+        self.crop_btn_batch.setText(f"Crop Selected ({selected_count})")
+        self.crop_btn_batch.setEnabled(selected_count > 0)
+        
+        all_visible_selected = all(c.checkbox.isChecked() for c in cards if c.isVisible())
+        any_visible_selected = any(c.checkbox.isChecked() for c in cards if c.isVisible())
+        self.crop_btn_select_all.blockSignals(True)
+        self.crop_btn_select_all.setChecked(all_visible_selected and any_visible_selected)
+        self.crop_btn_select_all.blockSignals(False)
+
+    def on_card_clicked_crop(self, file_path):
+        self.set_status(f"Selected for Smart Crop: {os.path.basename(file_path)}")
+        from src.dialogs import SmartCropConfirmDialog
+        confirm = SmartCropConfirmDialog(file_path, self)
+        if confirm.exec() == QDialog.Accepted:
+            params = confirm.get_settings()
+            self.active_tool = 'crop'
+            self.crop_params = params
+            self.batch_queue = [file_path]
+            self.batch_results = []
+            self.batch_total = 1
+            self.process_next_batch_item()
+
+    def on_process_selected_crop(self):
+        selected_cards = [card for card in self.crop_cards if isinstance(card, ImageCard) and card.checkbox.isChecked()]
+        if not selected_cards:
+            return
+            
+        from src.dialogs import BatchSmartCropConfirmDialog
+        confirm = BatchSmartCropConfirmDialog(len(selected_cards), self)
+        if confirm.exec() == QDialog.Accepted:
+            params = confirm.get_settings()
+            self.active_tool = 'crop'
+            self.crop_params = params
+            self.batch_queue = [c.file_path for c in selected_cards]
+            self.batch_results = []
+            self.batch_total = len(selected_cards)
+            self.process_next_batch_item()
+            
+    def start_batch_crop_worker(self, file_path, current_num):
+        from src.workers import SmartCropWorker, IconGeneratorWorker, MetadataStripWorker
+        worker = SmartCropWorker, IconGeneratorWorker, MetadataStripWorker(file_path, self.crop_params.get("aspect_ratio", "1:1"))
+        worker.finished.connect(lambda success, result, error: self.on_batch_crop_finished(success, result, error, file_path, current_num))
+        
+        for card in self.crop_cards:
+            if isinstance(card, ImageCard) and card.file_path == file_path:
+                card.set_processing(True)
+                break
+                
+        if hasattr(self, 'loading_dlg') and self.loading_dlg.isVisible():
+            self.loading_dlg.set_progress(f"Cropping {os.path.basename(file_path)}...", current_num, self.batch_total)
+            
+        worker.start()
+        self.current_worker = worker
+
+    def on_batch_crop_finished(self, success, result_pil, error_msg, file_path, current_num):
+        if success:
+            self.batch_results.append({'file_path': file_path, 'pil_img': result_pil, 'action': 'keep'})
+        else:
+            self.show_toast(f"Error: {error_msg}", 'error')
+            
+        for card in self.crop_cards:
+            if isinstance(card, ImageCard) and getattr(card, '_spinner', None) and card._spinner.isVisible():
+                if success:
+                    card.set_processing(False)
+                else:
+                    card.set_error()
+                break
+                
+        self.process_next_batch_item()
+
+    def filter_icon_grid(self, text):
+        query = text.lower()
+        for card in self.icon_cards:
+            if isinstance(card, ImageCard):
+                filename = os.path.basename(card.file_path).lower()
+                card.setVisible(query in filename)
+                
+    def select_all_icon(self):
+        is_checked = self.icon_btn_select_all.isChecked()
+        for card in self.icon_cards:
+            if isinstance(card, ImageCard) and card.isVisible():
+                card.checkbox.setChecked(is_checked)
+        self.update_batch_button_icon()
+    def update_batch_button_icon(self):
+        if not hasattr(self, 'icon_cards'): return
+        selected_count = sum(1 for card in self.icon_cards if isinstance(card, ImageCard) and card.checkbox.isChecked())
+        cards = [c for c in self.icon_cards if isinstance(c, ImageCard)]
+        if not cards: return
+        self.icon_btn_batch.setText(f"Generate Selected ({selected_count})")
+        self.icon_btn_batch.setEnabled(selected_count > 0)
+        
+        all_visible_selected = all(c.checkbox.isChecked() for c in cards if c.isVisible())
+        any_visible_selected = any(c.checkbox.isChecked() for c in cards if c.isVisible())
+        self.icon_btn_select_all.blockSignals(True)
+        self.icon_btn_select_all.setChecked(all_visible_selected and any_visible_selected)
+        self.icon_btn_select_all.blockSignals(False)
+
+    def on_card_clicked_icon(self, file_path):
+        self.set_status(f"Selected for Favicon: {os.path.basename(file_path)}")
+        from src.dialogs import IconGenConfirmDialog
+        confirm = IconGenConfirmDialog(file_path, self)
+        if confirm.exec() == QDialog.Accepted:
+            self.active_tool = 'icon'
+            self.batch_queue = [file_path]
+            self.batch_results = []
+            self.batch_total = 1
+            self.process_next_batch_item()
+
+    def on_process_selected_icon(self):
+        selected_cards = [card for card in self.icon_cards if isinstance(card, ImageCard) and card.checkbox.isChecked()]
+        if not selected_cards:
+            return
+            
+        from src.dialogs import BatchIconGenConfirmDialog
+        confirm = BatchIconGenConfirmDialog(len(selected_cards), self)
+        if confirm.exec() == QDialog.Accepted:
+            self.active_tool = 'icon'
+            self.batch_queue = [c.file_path for c in selected_cards]
+            self.batch_results = []
+            self.batch_total = len(selected_cards)
+            self.process_next_batch_item()
+            
+    def start_batch_icon_worker(self, file_path, current_num):
+        from src.workers import IconGeneratorWorker, MetadataStripWorker
+        worker = IconGeneratorWorker, MetadataStripWorker(file_path)
+        worker.finished.connect(lambda success, result, error: self.on_batch_icon_finished(success, result, error, file_path, current_num))
+        
+        for card in self.icon_cards:
+            if isinstance(card, ImageCard) and card.file_path == file_path:
+                card.set_processing(True)
+                break
+                
+        if hasattr(self, 'loading_dlg') and self.loading_dlg.isVisible():
+            self.loading_dlg.set_progress(f"Generating icons for {os.path.basename(file_path)}...", current_num, self.batch_total)
+            
+        worker.start()
+        self.current_worker = worker
+
+    def on_batch_icon_finished(self, success, out_zip, error_msg, file_path, current_num):
+        if success:
+            self.batch_results.append({'file_path': out_zip})
+            self.set_status(f"Icons saved to: {os.path.basename(out_zip)}")
+        else:
+            self.show_toast(f"Error: {error_msg}", 'error')
+            
+        for card in self.icon_cards:
+            if isinstance(card, ImageCard) and getattr(card, '_spinner', None) and card._spinner.isVisible():
+                if success:
+                    card.set_processing(False)
+                else:
+                    card.set_error()
+                break
+                
+        self.process_next_batch_item()
+
+
+    def filter_meta_grid(self, text):
+        query = text.lower()
+        for card in self.meta_cards:
+            if isinstance(card, ImageCard):
+                filename = os.path.basename(card.file_path).lower()
+                card.setVisible(query in filename)
+                
+    def select_all_meta(self):
+        is_checked = self.meta_btn_select_all.isChecked()
+        for card in self.meta_cards:
+            if isinstance(card, ImageCard) and card.isVisible():
+                card.checkbox.setChecked(is_checked)
+        self.update_batch_button_meta()
+        
+    def update_batch_button_meta(self):
+        if not hasattr(self, 'meta_cards'): return
+        selected_count = sum(1 for card in self.meta_cards if isinstance(card, ImageCard) and card.checkbox.isChecked())
+        cards = [c for c in self.meta_cards if isinstance(c, ImageCard)]
+        if not cards: return
+        self.meta_btn_batch.setText(f"Strip Selected ({selected_count})")
+        self.meta_btn_batch.setEnabled(selected_count > 0)
+        
+        all_visible_selected = all(c.checkbox.isChecked() for c in cards if c.isVisible())
+        any_visible_selected = any(c.checkbox.isChecked() for c in cards if c.isVisible())
+        self.meta_btn_select_all.blockSignals(True)
+        self.meta_btn_select_all.setChecked(all_visible_selected and any_visible_selected)
+        self.meta_btn_select_all.blockSignals(False)
+
+    def on_card_clicked_meta(self, file_path):
+        self.set_status(f"Viewing Metadata: {os.path.basename(file_path)}")
+        from src.dialogs import MetadataViewerDialog
+        confirm = MetadataViewerDialog(file_path, self)
+        if confirm.exec() == QDialog.Accepted:
+            self.active_tool = 'meta'
+            self.batch_queue = [file_path]
+            self.batch_results = []
+            self.batch_total = 1
+            self.process_next_batch_item()
+
+    def on_process_selected_meta(self):
+        selected_cards = [card for card in self.meta_cards if isinstance(card, ImageCard) and card.checkbox.isChecked()]
+        if not selected_cards:
+            return
+            
+        from src.dialogs import BatchMetadataConfirmDialog
+        confirm = BatchMetadataConfirmDialog(len(selected_cards), self)
+        if confirm.exec() == QDialog.Accepted:
+            self.active_tool = 'meta'
+            self.batch_queue = [c.file_path for c in selected_cards]
+            self.batch_results = []
+            self.batch_total = len(selected_cards)
+            self.process_next_batch_item()
+            
+    def start_batch_meta_worker(self, file_path, current_num):
+        from src.workers import MetadataStripWorker
+        worker = MetadataStripWorker(file_path)
+        worker.finished.connect(lambda success, result, error: self.on_batch_meta_finished(success, result, error, file_path, current_num))
+        
+        for card in self.meta_cards:
+            if isinstance(card, ImageCard) and card.file_path == file_path:
+                card.set_processing(True)
+                break
+                
+        if hasattr(self, 'loading_dlg') and self.loading_dlg.isVisible():
+            self.loading_dlg.set_progress(f"Stripping metadata from {os.path.basename(file_path)}...", current_num, self.batch_total)
+            
+        worker.start()
+        self.current_worker = worker
+
+    def on_batch_meta_finished(self, success, out_path, error_msg, file_path, current_num):
+        if success:
+            self.batch_results.append({'file_path': out_path})
+            self.set_status(f"Stripped metadata: {os.path.basename(out_path)}")
+        else:
+            self.show_toast(f"Error: {error_msg}", 'error')
+            
+        for card in self.meta_cards:
+            if isinstance(card, ImageCard) and getattr(card, '_spinner', None) and card._spinner.isVisible():
+                if success:
+                    card.set_processing(False)
+                else:
+                    card.set_error()
+                break
+                
+        self.process_next_batch_item()

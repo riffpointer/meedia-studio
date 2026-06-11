@@ -3,7 +3,7 @@ import urllib.request
 import subprocess
 from PySide6.QtCore import QThread, Signal
 
-from src.utils import find_realesrgan_exe, vectorize_image
+from src.utils import find_realesrgan_exe, vectorize_image, get_app_data_dir
 
 # Unified Background thread file downloader
 class FileDownloadWorker(QThread):
@@ -91,7 +91,7 @@ class UpscaleWorker(QThread):
                 import tempfile
                 import uuid
                 
-                realesrgan_dir = os.path.expanduser("~/.realesrgan")
+                realesrgan_dir = os.path.join(get_app_data_dir(), "models", "realesrgan")
                 exe_path = find_realesrgan_exe(realesrgan_dir)
                 if not exe_path or not os.path.exists(exe_path):
                     raise FileNotFoundError("Real-ESRGAN engine not found. Please download it first.")
@@ -147,7 +147,7 @@ class UpscaleWorker(QThread):
             channels = img.shape[2] if len(img.shape) > 2 else 1
             
             model_filename = f"{self.model_name.upper()}_x{self.scale}.pb"
-            model_dir = os.path.expanduser("~/.opencv_superres")
+            model_dir = os.path.join(get_app_data_dir(), "models", "opencv_superres")
             model_path = os.path.join(model_dir, model_filename)
             
             sr = dnn_superres.DnnSuperResImpl_create()
@@ -427,3 +427,283 @@ class RestorationWorker(QThread):
             traceback.print_exc()
             self.finished.emit(False, None, str(e))
 
+# Background thread worker for converting Video to GIF/WebP
+class VideoConvertWorker(QThread):
+    finished = Signal(bool, str, str)  # success, out_path, error_message
+    
+    def __init__(self, video_path, out_format="gif", fps=15, scale="320:-1", dither="none"):
+        super().__init__()
+        self.video_path = video_path
+        self.out_format = out_format
+        self.fps = fps
+        self.scale = scale
+        self.dither = dither
+        
+    def run(self):
+        try:
+            import imageio_ffmpeg
+            import subprocess
+            import tempfile
+            
+            exe_path = imageio_ffmpeg.get_ffmpeg_exe()
+            
+            base, _ = os.path.splitext(self.video_path)
+            out_path = f"{base}.{self.out_format}"
+            
+            if self.out_format == "gif":
+                palette_path = os.path.join(tempfile.gettempdir(), f"palette_{id(self)}.png")
+                cmd1 = [
+                    exe_path, "-y", "-i", self.video_path,
+                    "-vf", f"fps={self.fps},scale={self.scale}:flags=lanczos,palettegen=stats_mode=diff",
+                    palette_path
+                ]
+                dither_arg = f"dither={self.dither}"
+                cmd2 = [
+                    exe_path, "-y", "-i", self.video_path, "-i", palette_path,
+                    "-lavfi", f"fps={self.fps},scale={self.scale}:flags=lanczos [x]; [x][1:v] paletteuse={dither_arg}",
+                    out_path
+                ]
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                subprocess.run(cmd1, check=True, capture_output=True, startupinfo=startupinfo)
+                subprocess.run(cmd2, check=True, capture_output=True, startupinfo=startupinfo)
+                try:
+                    os.remove(palette_path)
+                except OSError:
+                    pass
+            elif self.out_format == "webp":
+                cmd = [
+                    exe_path, "-y", "-i", self.video_path,
+                    "-vcodec", "libwebp", "-lossless", "0", "-qscale", "80",
+                    "-preset", "default", "-loop", "0", "-an",
+                    "-vf", f"fps={self.fps},scale={self.scale}:flags=lanczos",
+                    out_path
+                ]
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                subprocess.run(cmd, check=True, capture_output=True, startupinfo=startupinfo)
+            else:
+                raise ValueError("Unsupported format")
+                
+            self.finished.emit(True, out_path, "")
+        except Exception as e:
+            self.finished.emit(False, "", str(e))
+
+class SmartCropWorker(QThread):
+    finished = Signal(bool, object, str)
+    
+    def __init__(self, image_path, aspect_ratio="1:1"):
+        super().__init__()
+        self.image_path = image_path
+        self.aspect_ratio = aspect_ratio
+        
+    def run(self):
+        try:
+            from rembg import remove, new_session
+            from PIL import Image, ImageOps
+            import numpy as np
+            
+            session = new_session("u2net")
+            img = Image.open(self.image_path).convert("RGB")
+            
+            # Get Saliency Map
+            mask = remove(img, session=session, only_mask=True)
+            mask_arr = np.array(mask)
+            
+            # Find bounding box
+            coords = np.argwhere(mask_arr > 128)
+            if len(coords) == 0:
+                cx, cy = img.width // 2, img.height // 2
+                box_w, box_h = img.width // 2, img.height // 2
+            else:
+                y0, x0 = coords.min(axis=0)
+                y1, x1 = coords.max(axis=0)
+                cx = (x0 + x1) // 2
+                cy = (y0 + y1) // 2
+                box_w = x1 - x0
+                box_h = y1 - y0
+                
+            # Target Aspect Ratio
+            if self.aspect_ratio == "1:1":
+                target_ar = 1.0
+            elif self.aspect_ratio == "16:9":
+                target_ar = 16.0 / 9.0
+            elif self.aspect_ratio == "4:3":
+                target_ar = 4.0 / 3.0
+            elif self.aspect_ratio == "3:4":
+                target_ar = 3.0 / 4.0
+            elif self.aspect_ratio == "9:16":
+                target_ar = 9.0 / 16.0
+            else:
+                target_ar = 1.0
+                
+            img_w, img_h = img.size
+            
+            # Add some padding around the subject (10%)
+            min_w = int(box_w * 1.1)
+            min_h = int(box_h * 1.1)
+            
+            if target_ar >= 1:
+                min_w = max(min_w, int(min_h * target_ar))
+                min_h = max(min_h, int(min_w / target_ar))
+            else:
+                min_h = max(min_h, int(min_w / target_ar))
+                min_w = max(min_w, int(min_h * target_ar))
+            
+            max_w = min(img_w, int(img_h * target_ar))
+            max_h = min(img_h, int(img_w / target_ar))
+            
+            crop_w = max(min_w, max_w)
+            crop_h = max(min_h, max_h)
+            
+            left = cx - crop_w // 2
+            top = cy - crop_h // 2
+            right = left + crop_w
+            bottom = top + crop_h
+            
+            if left < 0:
+                right -= left
+                left = 0
+            if top < 0:
+                bottom -= top
+                top = 0
+            if right > img_w:
+                left -= (right - img_w)
+                right = img_w
+            if bottom > img_h:
+                top -= (bottom - img_h)
+                bottom = img_h
+                
+            pad_left = max(0, -left)
+            pad_top = max(0, -top)
+            pad_right = max(0, right - img_w)
+            pad_bottom = max(0, bottom - img_h)
+            
+            if pad_left > 0 or pad_top > 0 or pad_right > 0 or pad_bottom > 0:
+                img = ImageOps.expand(img, border=(pad_left, pad_top, pad_right, pad_bottom), fill=(0, 0, 0))
+                left += pad_left
+                right += pad_left
+                top += pad_top
+                bottom += pad_top
+                
+            cropped = img.crop((left, top, right, bottom))
+            self.finished.emit(True, cropped, "")
+        except Exception as e:
+            self.finished.emit(False, None, str(e))
+
+
+class IconGeneratorWorker(QThread):
+    finished = Signal(bool, str, str)
+    
+    def __init__(self, image_path):
+        super().__init__()
+        self.image_path = image_path
+        
+    def run(self):
+        try:
+            from PIL import Image, ImageOps
+            import zipfile
+            import io
+            
+            img = Image.open(self.image_path).convert("RGBA")
+            
+            def make_icon(size):
+                w, h = img.size
+                min_dim = min(w, h)
+                left = (w - min_dim) // 2
+                top = (h - min_dim) // 2
+                right = left + min_dim
+                bottom = top + min_dim
+                
+                cropped = img.crop((left, top, right, bottom))
+                return cropped.resize((size, size), Image.Resampling.LANCZOS)
+                
+            out_dir = os.path.dirname(self.image_path)
+            base_name = os.path.splitext(os.path.basename(self.image_path))[0]
+            zip_path = os.path.join(out_dir, f"{base_name}_icons.zip")
+            
+            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+                ico_sizes = [(16, 16), (32, 32), (48, 48), (64, 64)]
+                ico_images = [make_icon(s[0]) for s in ico_sizes]
+                ico_bytes = io.BytesIO()
+                ico_images[0].save(ico_bytes, format='ICO', sizes=ico_sizes, append_images=ico_images[1:])
+                zf.writestr("favicon.ico", ico_bytes.getvalue())
+                
+                png_16 = io.BytesIO()
+                make_icon(16).save(png_16, format='PNG')
+                zf.writestr("favicon-16x16.png", png_16.getvalue())
+                
+                png_32 = io.BytesIO()
+                make_icon(32).save(png_32, format='PNG')
+                zf.writestr("favicon-32x32.png", png_32.getvalue())
+                
+                png_apple = io.BytesIO()
+                apple_img = Image.new("RGB", (180, 180), (255, 255, 255))
+                icon_180 = make_icon(180)
+                apple_img.paste(icon_180, mask=icon_180.split()[3])
+                apple_img.save(png_apple, format='PNG')
+                zf.writestr("apple-touch-icon.png", png_apple.getvalue())
+                
+                png_192 = io.BytesIO()
+                make_icon(192).save(png_192, format='PNG')
+                zf.writestr("android-chrome-192x192.png", png_192.getvalue())
+                
+                png_512 = io.BytesIO()
+                make_icon(512).save(png_512, format='PNG')
+                zf.writestr("android-chrome-512x512.png", png_512.getvalue())
+                
+                manifest = '''{
+  "name": "App",
+  "short_name": "App",
+  "icons": [
+    {
+      "src": "/android-chrome-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/android-chrome-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "theme_color": "#ffffff",
+  "background_color": "#ffffff",
+  "display": "standalone"
+}'''
+                zf.writestr("site.webmanifest", manifest)
+                
+            self.finished.emit(True, zip_path, "")
+            
+        except Exception as e:
+            self.finished.emit(False, "", str(e))
+
+
+class MetadataStripWorker(QThread):
+    finished = Signal(bool, str, str)
+    
+    def __init__(self, image_path):
+        super().__init__()
+        self.image_path = image_path
+        
+    def run(self):
+        try:
+            from PIL import Image
+            import os
+            
+            img = Image.open(self.image_path)
+            
+            out_dir = os.path.dirname(self.image_path)
+            base, ext = os.path.splitext(os.path.basename(self.image_path))
+            out_path = os.path.join(out_dir, f"{base}_stripped{ext}")
+            
+            # Remove metadata
+            img.info.pop('exif', None)
+            img.info.pop('icc_profile', None)
+            img.info.pop('xmp', None)
+            
+            img.save(out_path)
+            self.finished.emit(True, out_path, "")
+            
+        except Exception as e:
+            self.finished.emit(False, "", str(e))
