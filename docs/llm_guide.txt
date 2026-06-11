@@ -6,6 +6,7 @@ These rules are NON-NEGOTIABLE. Violating any of them is a bug. When in doubt,
 choose the simpler, more conventional layout over a clever one.
 
 --------------------------------------------------------------------------------
+1  VISUAL TOKENS
 --------------------------------------------------------------------------------
 Corner radius:
   • Buttons, cards, and dialogs → 8 px
