@@ -14,6 +14,10 @@ class FileDownloadWorker(QThread):
         super().__init__()
         self.url = url
         self.dest_path = dest_path
+        self._is_cancelled = False
+        
+    def cancel(self):
+        self._is_cancelled = True
         
     def run(self):
         try:
@@ -31,6 +35,8 @@ class FileDownloadWorker(QThread):
                 temp_path = self.dest_path + ".tmp"
                 with open(temp_path, 'wb') as f:
                     while True:
+                        if self._is_cancelled:
+                            break
                         buffer = response.read(block_size)
                         if not buffer:
                             break
@@ -42,6 +48,15 @@ class FileDownloadWorker(QThread):
                         else:
                             self.progress.emit(-1, bytes_read, 0)
                 
+                if self._is_cancelled:
+                    try:
+                        if os.path.exists(temp_path):
+                            os.remove(temp_path)
+                    except OSError:
+                        pass
+                    self.finished.emit(False, "Cancelled")
+                    return
+                    
                 if os.path.exists(self.dest_path):
                     os.remove(self.dest_path)
                 os.rename(temp_path, self.dest_path)

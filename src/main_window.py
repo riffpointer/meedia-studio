@@ -22,6 +22,7 @@ from src.widgets import DragTabBar, ImageCard, DroppableScrollArea, ToastNotific
 from src.duplicate_cleaner_dialog import DuplicateCleanerDialog
 from src.workers import FileDownloadWorker, BGRemovalWorker, UpscaleWorker, VectorizerWorker, RestorationWorker, VideoConvertWorker
 from src.dialogs import (
+    DetailedErrorDialog,
     SmartCropConfirmDialog, BatchSmartCropConfirmDialog, IconGenConfirmDialog, BatchIconGenConfirmDialog, MetadataViewerDialog, BatchMetadataConfirmDialog,
     ConfirmDialog, BatchConfirmDialog, UpscaleConfirmDialog, BatchUpscaleConfirmDialog,
     VectorConfirmDialog, VectorComparisonDialog, BatchVectorConfirmDialog, LoadingDialog,
@@ -32,6 +33,8 @@ from src.font_downloader_worker import DownloadWorker
 from src.font_downloader_dialogs import DownloadProgressDialog, FontInfoDialog, FormatHelpDialog
 from src.font_install_progress_dialog import FontInstallProgressDialog
 from src.myinstants_tab import MyInstantsTab
+from src.ytdlp_tab import YTDLPTab
+from src.browser_tab import BrowserTab
 
 def _get_tc():
     """Alias for get_theme_colors() usable before class is instantiated."""
@@ -217,7 +220,13 @@ class MainWindow(QMainWindow):
         self.btn_duplicates.setObjectName("secondaryButton")
         self.btn_duplicates.clicked.connect(self.on_clean_duplicates)
         
+        self.btn_my_downloads = QPushButton("My Downloads", self)
+        self.btn_my_downloads.setIcon(QIcon("res/icons/bootstrap-png/folder2.png"))
+        self.btn_my_downloads.setObjectName("secondaryButton")
+        self.btn_my_downloads.setVisible(False)
+        
         header_layout.addWidget(self.btn_duplicates)
+        header_layout.addWidget(self.btn_my_downloads)
         header_layout.addWidget(self.btn_settings)
         header_layout.addWidget(self.btn_refresh)
         main_layout.addWidget(header_widget)
@@ -265,7 +274,6 @@ class MainWindow(QMainWindow):
         bg_row_layout.addWidget(self.bg_search, 1)
         
         self.bg_btn_select_all = QCheckBox("Select All", self.bg_batch_row)
-        self.bg_btn_select_all.setVisible(False)
         self.bg_btn_select_all.setObjectName("selectAllButton")
         self.bg_btn_select_all.clicked.connect(self.select_all_bg)
         bg_row_layout.addWidget(self.bg_btn_select_all)
@@ -316,7 +324,6 @@ class MainWindow(QMainWindow):
         up_row_layout.addWidget(self.up_search, 1)
         
         self.up_btn_select_all = QCheckBox("Select All", self.up_batch_row)
-        self.up_btn_select_all.setVisible(False)
         self.up_btn_select_all.setObjectName("selectAllButton")
         self.up_btn_select_all.clicked.connect(self.select_all_upscaler)
         up_row_layout.addWidget(self.up_btn_select_all)
@@ -370,7 +377,6 @@ class MainWindow(QMainWindow):
         vec_row_layout.addWidget(self.vec_search, 1)
         
         self.vec_btn_select_all = QCheckBox("Select All", self.vec_batch_row)
-        self.vec_btn_select_all.setVisible(False)
         self.vec_btn_select_all.setObjectName("selectAllButton")
         self.vec_btn_select_all.clicked.connect(self.select_all_vectorizer)
         vec_row_layout.addWidget(self.vec_btn_select_all)
@@ -424,7 +430,6 @@ class MainWindow(QMainWindow):
         rest_row_layout.addWidget(self.rest_search, 1)
         
         self.rest_btn_select_all = QCheckBox("Select All", self.rest_batch_row)
-        self.rest_btn_select_all.setVisible(False)
         self.rest_btn_select_all.setObjectName("selectAllButton")
         self.rest_btn_select_all.clicked.connect(self.select_all_restoration)
         rest_row_layout.addWidget(self.rest_btn_select_all)
@@ -479,7 +484,6 @@ class MainWindow(QMainWindow):
         vid_row_layout.addWidget(self.vid_search, 1)
         
         self.vid_btn_select_all = QCheckBox("Select All", self.vid_batch_row)
-        self.vid_btn_select_all.setVisible(False)
         self.vid_btn_select_all.setObjectName("selectAllButton")
         self.vid_btn_select_all.clicked.connect(self.select_all_vid)
         vid_row_layout.addWidget(self.vid_btn_select_all)
@@ -528,7 +532,6 @@ class MainWindow(QMainWindow):
         crop_row_layout.addWidget(self.crop_search, 1)
         
         self.crop_btn_select_all = QCheckBox("Select All", self.crop_batch_row)
-        self.crop_btn_select_all.setVisible(False)
         self.crop_btn_select_all.setObjectName("selectAllButton")
         self.crop_btn_select_all.clicked.connect(self.select_all_crop)
         crop_row_layout.addWidget(self.crop_btn_select_all)
@@ -577,7 +580,6 @@ class MainWindow(QMainWindow):
         icon_row_layout.addWidget(self.icon_search, 1)
         
         self.icon_btn_select_all = QCheckBox("Select All", self.icon_batch_row)
-        self.icon_btn_select_all.setVisible(False)
         self.icon_btn_select_all.setObjectName("selectAllButton")
         self.icon_btn_select_all.clicked.connect(self.select_all_icon)
         icon_row_layout.addWidget(self.icon_btn_select_all)
@@ -627,7 +629,6 @@ class MainWindow(QMainWindow):
         meta_row_layout.addWidget(self.meta_search, 1)
         
         self.meta_btn_select_all = QCheckBox("Select All", self.meta_batch_row)
-        self.meta_btn_select_all.setVisible(False)
         self.meta_btn_select_all.setObjectName("selectAllButton")
         self.meta_btn_select_all.clicked.connect(self.select_all_meta)
         meta_row_layout.addWidget(self.meta_btn_select_all)
@@ -784,6 +785,14 @@ class MainWindow(QMainWindow):
         self.myinstants_tab = MyInstantsTab(self)
         self.tabs.addTab(self.myinstants_tab, QIcon("res/icons/bootstrap-png/boombox.png"), "Soundboard")
 
+        # 7. YTDLP Tab Widget
+        self.ytdlp_tab = YTDLPTab(self)
+        self.tabs.addTab(self.ytdlp_tab, QIcon("res/icons/bootstrap-png/download.png"), "YTDLP")
+
+        # 8. Browser Tab Widget
+        self.browser_tab = BrowserTab(self)
+        self.tabs.addTab(self.browser_tab, QIcon("res/icons/bootstrap-png/globe.png"), "Browser")
+
         
         # Setup Font Downloader state
         self.fonts_catalog = []
@@ -811,6 +820,9 @@ class MainWindow(QMainWindow):
         footer_layout = QHBoxLayout()
         self.status_label = QLabel("Ready. Select checkbox to batch process, or click card directly.", self)
         self.status_label.setObjectName("statusLabel")
+        from PySide6.QtWidgets import QSizePolicy
+        self.status_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.status_label.setMinimumWidth(1)
         footer_layout.addWidget(self.status_label)
         footer_layout.addStretch()
         
@@ -839,15 +851,31 @@ class MainWindow(QMainWindow):
                     default_dirs.append(abs_d)
                     
         primary = self.settings.get("primary_folder", "")
+        # Read browser image pool configuration
+        browser_img_pool = self.settings.get("browser_image_pool", "")
+        
+        scan_dirs = []
         if primary and os.path.exists(primary) and os.path.isdir(primary):
             primary = os.path.abspath(primary)
+            scan_dirs.append(primary)
             parent = os.path.dirname(primary)
-            scan_dirs = [primary]
             if parent and os.path.exists(parent) and os.path.isdir(parent):
                 scan_dirs.append(os.path.abspath(parent))
+                
+        if browser_img_pool and os.path.exists(browser_img_pool) and os.path.isdir(browser_img_pool):
+            browser_img_pool = os.path.abspath(browser_img_pool)
+            if browser_img_pool not in scan_dirs:
+                scan_dirs.append(browser_img_pool)
+
+        if scan_dirs:
             self.current_dirs = scan_dirs
         else:
+            # Also append browser image pool if custom default is used
             self.current_dirs = default_dirs
+            if browser_img_pool and os.path.exists(browser_img_pool) and os.path.isdir(browser_img_pool):
+                browser_img_pool = os.path.abspath(browser_img_pool)
+                if browser_img_pool not in self.current_dirs:
+                    self.current_dirs.append(browser_img_pool)
             
         self.load_directories(self.current_dirs)
         
@@ -1052,7 +1080,82 @@ class MainWindow(QMainWindow):
             self.save_app_settings()
         except Exception as e:
             print(f"Error saving geometry: {e}")
-        super().closeEvent(event)
+            
+        try:
+            # Terminate any ytdlp background workers if running
+            if hasattr(self, "ytdlp_tab"):
+                # Clean up stacked widget progress panels
+                for i in range(self.ytdlp_tab.stacked_widget.count()):
+                    w = self.ytdlp_tab.stacked_widget.widget(i)
+                    if hasattr(w, "worker") and w.worker:
+                        try:
+                            w.worker.cancel()
+                            w.worker.wait(200)
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+            
+        # Hide the main window immediately so the UI disappears instantly
+        self.hide()
+        
+        # If browser_tab exists, show a "Closing browser..." dialog with a progress bar and let it exit asynchronously/after window updates
+        if hasattr(self, "browser_tab"):
+            try:
+                from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel, QProgressBar
+                from src.dialogs import _tc
+                
+                # Close all browser tab widgets cleanly
+                try:
+                    self.browser_tab.tab_widget.clear()
+                except Exception:
+                    pass
+
+                # Show closing window progress dialog
+                dlg = QDialog()
+                dlg.setWindowTitle("Closing Browser")
+                dlg.setMinimumSize(300, 100)
+                dlg.setModal(True)
+                dlg.setWindowFlags(dlg.windowFlags() | Qt.CustomizeWindowHint)
+                dlg.setWindowFlags(dlg.windowFlags() & ~Qt.WindowCloseButtonHint)
+                
+                dlg_layout = QVBoxLayout(dlg)
+                dlg_layout.setContentsMargins(20, 20, 20, 20)
+                dlg_layout.setSpacing(12)
+                
+                tc = _tc()
+                dlg.setStyleSheet(f"QDialog {{ background-color: {tc['dialog_bg']}; }}")
+                
+                lbl = QLabel("Releasing browser resources...", dlg)
+                lbl.setStyleSheet(f"color: {tc['text']}; font-weight: bold;")
+                dlg_layout.addWidget(lbl)
+                
+                pbar = QProgressBar(dlg)
+                pbar.setRange(0, 0) # Indeterminate style
+                pbar.setFixedHeight(6)
+                pbar.setStyleSheet(f"""
+                    QProgressBar {{
+                        background-color: rgba(255,255,255,0.08);
+                        border: none;
+                        border-radius: 3px;
+                    }}
+                    QProgressBar::chunk {{
+                        background-color: {tc['accent']};
+                        border-radius: 3px;
+                    }}
+                """)
+                dlg_layout.addWidget(pbar)
+                
+                dlg.show()
+                # Process events to render the dialog cleanly
+                for _ in range(10):
+                    QApplication.processEvents()
+            except Exception as e:
+                print(f"Error showing close dialog: {e}")
+
+        # Forcibly exit the process to prevent threads or locks from delaying shutdown
+        import os
+        os._exit(0)
     def is_system_light_mode(self):
         try:
             import winreg
@@ -1375,7 +1478,10 @@ class MainWindow(QMainWindow):
         """
             
     def set_status(self, text):
-        self.status_label.setText(text)
+        text_str = str(text)
+        if len(text_str) > 120:
+            text_str = text_str[:117] + "..."
+        self.status_label.setText(text_str)
 
     def show_toast(self, message: str, severity: str = 'info', duration_ms: int = 3500):
         """Show a non-blocking slide-in toast notification at the bottom-right of the window."""
@@ -1866,62 +1972,51 @@ class MainWindow(QMainWindow):
         if scroll_width <= 100:
             scroll_width = self.width() - 200 # Subtract vertical tab bar width
             
-        card_width = 185
-        cols = max(1, scroll_width // card_width)
+        cols = max(1, (scroll_width - 20) // 176)
         
-        # Populate BG Grid
-        for idx, card in enumerate(self.bg_cards):
-            row = idx // cols
-            col = idx % cols
-            self.bg_grid_layout.addWidget(card, row, col)
-            
-        # Populate Grid for Upscaler
-        for idx, card in enumerate(self.upscaler_cards):
-            row = idx // cols
-            col = idx % cols
-            self.up_grid_layout.addWidget(card, row, col)
-            
-        # Populate Grid for Vectorizer
+        # Build list of active grids and cards
+        grids_info = [
+            (self.bg_grid_layout, self.bg_cards),
+            (self.up_grid_layout, self.upscaler_cards),
+        ]
         if hasattr(self, 'vectorizer_cards') and hasattr(self, 'vec_grid_layout'):
-            for idx, card in enumerate(self.vectorizer_cards):
-                row = idx // cols
-                col = idx % cols
-                self.vec_grid_layout.addWidget(card, row, col)
-                
-        # Populate Grid for Restoration
+            grids_info.append((self.vec_grid_layout, self.vectorizer_cards))
         if hasattr(self, 'restoration_cards') and hasattr(self, 'rest_grid_layout'):
-            for idx, card in enumerate(self.restoration_cards):
-                row = idx // cols
-                col = idx % cols
-                self.rest_grid_layout.addWidget(card, row, col)
-                
-        # Populate Grid for Video
+            grids_info.append((self.rest_grid_layout, self.restoration_cards))
         if hasattr(self, 'vid_cards') and hasattr(self, 'vid_grid_layout'):
-            for idx, card in enumerate(self.vid_cards):
-                row = idx // cols
-                col = idx % cols
-                self.vid_grid_layout.addWidget(card, row, col)
-                
-        # Populate Grid for Crop
+            grids_info.append((self.vid_grid_layout, self.vid_cards))
         if hasattr(self, 'crop_cards') and hasattr(self, 'crop_grid_layout'):
-            for idx, card in enumerate(self.crop_cards):
-                row = idx // cols
-                col = idx % cols
-                self.crop_grid_layout.addWidget(card, row, col)
-                
-        # Populate Grid for Icon
+            grids_info.append((self.crop_grid_layout, self.crop_cards))
         if hasattr(self, 'icon_cards') and hasattr(self, 'icon_grid_layout'):
-            for idx, card in enumerate(self.icon_cards):
-                row = idx // cols
-                col = idx % cols
-                self.icon_grid_layout.addWidget(card, row, col)
-                
-        # Populate Grid for Meta
+            grids_info.append((self.icon_grid_layout, self.icon_cards))
         if hasattr(self, 'meta_cards') and hasattr(self, 'meta_grid_layout'):
-            for idx, card in enumerate(self.meta_cards):
+            grids_info.append((self.meta_grid_layout, self.meta_cards))
+            
+        for layout, cards in grids_info:
+            # Clear old column stretches
+            for c in range(layout.columnCount()):
+                layout.setColumnStretch(c, 0)
+                
+            # Set stretches for current active columns
+            for c in range(cols):
+                layout.setColumnStretch(c, 1)
+                
+            # Count valid ImageCards
+            valid_cards = [c for c in cards if type(c).__name__ == "ImageCard"]
+            total_items = len(valid_cards)
+            
+            for idx, card in enumerate(cards):
+                if type(card).__name__ == "ImageCard":
+                    if total_items <= 1:
+                        card.setMaximumWidth(200)
+                    else:
+                        card.setMaximumWidth(16777215)
+                
                 row = idx // cols
                 col = idx % cols
-                self.meta_grid_layout.addWidget(card, row, col)
+                layout.addWidget(card, row, col)
+                
+            layout.setAlignment(Qt.AlignTop)
             
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -1940,12 +2035,22 @@ class MainWindow(QMainWindow):
             self.save_app_settings()
             self.apply_theme()
             
+            if hasattr(self, "ytdlp_tab"):
+                self.ytdlp_tab.update_recent_downloads_visibility()
+            
             new_folder = self.settings.get("primary_folder", "")
+            browser_img_pool = self.settings.get("browser_image_pool", "")
+            scan_set = []
             if new_folder and os.path.exists(new_folder) and os.path.isdir(new_folder):
+                scan_set.append(new_folder)
                 parent = os.path.dirname(new_folder)
-                scan_set = [new_folder]
                 if parent and os.path.exists(parent) and os.path.isdir(parent):
                     scan_set.append(parent)
+            if browser_img_pool and os.path.exists(browser_img_pool) and os.path.isdir(browser_img_pool):
+                browser_img_pool = os.path.abspath(browser_img_pool)
+                if browser_img_pool not in scan_set:
+                    scan_set.append(browser_img_pool)
+            if scan_set:
                 self.load_directories(scan_set)
                 
             self.set_status("Settings updated successfully.")
@@ -2115,9 +2220,9 @@ class MainWindow(QMainWindow):
         self.set_status(f"Selected for BG Removal: {os.path.basename(file_path)}")
         
         if not REMBG_AVAILABLE:
-            QMessageBox.critical(
+            DetailedErrorDialog.show_error(
                 self, "Dependency Error",
-                "The background removal library (rembg) is not installed.\n\n"
+                "The background removal library (rembg) is not installed.",
                 "To enable background removal, please run one of the following commands in your python environment:\n"
                 "- GPU Acceleration: pip install \"rembg[gpu]\"\n"
                 "- CPU Processing: pip install \"rembg\"\n\n"
@@ -2485,9 +2590,10 @@ class MainWindow(QMainWindow):
         if not success:
             if hasattr(self, 'loading_dlg') and self.loading_dlg.isVisible():
                 self.loading_dlg.close()
-            QMessageBox.critical(
+            DetailedErrorDialog.show_error(
                 self, "Download Failed", 
-                f"Could not download the Real-ESRGAN engine:\n{error_message}\n\nPlease verify your internet connection."
+                "Could not download the Real-ESRGAN engine",
+                f"{error_message}\n\nPlease verify your internet connection."
             )
             self.set_status("Real-ESRGAN download failed.")
             return
@@ -2508,9 +2614,10 @@ class MainWindow(QMainWindow):
         except Exception as e:
             if hasattr(self, 'loading_dlg') and self.loading_dlg.isVisible():
                 self.loading_dlg.close()
-            QMessageBox.critical(
+            DetailedErrorDialog.show_error(
                 self, "Extraction Failed", 
-                f"Could not extract Real-ESRGAN engine:\n{str(e)}"
+                "Could not extract Real-ESRGAN engine",
+                str(e)
             )
             self.set_status("Extraction failed.")
             return
@@ -2537,9 +2644,10 @@ class MainWindow(QMainWindow):
         if not success:
             if hasattr(self, 'loading_dlg') and self.loading_dlg.isVisible():
                 self.loading_dlg.close()
-            QMessageBox.critical(
+            DetailedErrorDialog.show_error(
                 self, "Download Failed", 
-                f"Could not download the AI weights model:\n{error_message}\n\nPlease verify your internet connection."
+                "Could not download the AI weights model",
+                f"{error_message}\n\nPlease verify your internet connection."
             )
             self.set_status("AI model download failed.")
             return
@@ -2574,7 +2682,7 @@ class MainWindow(QMainWindow):
         else:
             print(f"Error processing {file_path}: {error_message}")
             self.set_status(f"Failed to process: {os.path.basename(file_path)}")
-            QMessageBox.critical(self, "Processing Error", f"Error processing {os.path.basename(file_path)}:\n\n{error_message}")
+            DetailedErrorDialog.show_error(self, "Processing Error", f"Error processing {os.path.basename(file_path)}", error_message)
             
         self.process_next_batch_item()
         
@@ -2611,7 +2719,7 @@ class MainWindow(QMainWindow):
         else:
             print(f"Error vectorizing {file_path}: {error_message}")
             self.set_status(f"Failed to vectorize: {os.path.basename(file_path)}")
-            QMessageBox.critical(self, "Vectorizer Error", f"Error vectorizing {os.path.basename(file_path)}:\n\n{error_message}")
+            DetailedErrorDialog.show_error(self, "Vectorizer Error", f"Error vectorizing {os.path.basename(file_path)}", error_message)
             
         self.process_next_batch_item()
         
@@ -2639,9 +2747,10 @@ class MainWindow(QMainWindow):
         if not success:
             if hasattr(self, 'loading_dlg') and self.loading_dlg.isVisible():
                 self.loading_dlg.close()
-            QMessageBox.critical(
+            DetailedErrorDialog.show_error(
                 self, "Download Failed", 
-                f"Could not download the AI upscaler model:\n{error_message}\n\nPlease verify your internet connection."
+                "Could not download the AI upscaler model",
+                f"{error_message}\n\nPlease verify your internet connection."
             )
             self.set_status("AI upscaler model download failed.")
             return
@@ -2677,7 +2786,7 @@ class MainWindow(QMainWindow):
         else:
             print(f"Error upscaling {file_path}: {error_message}")
             self.set_status(f"Failed to upscale: {os.path.basename(file_path)}")
-            QMessageBox.critical(self, "Upscale Error", f"Error upscaling {os.path.basename(file_path)}:\n\n{error_message}")
+            DetailedErrorDialog.show_error(self, "Upscale Error", f"Error upscaling {os.path.basename(file_path)}", error_message)
             
         self.process_next_batch_item()
         
@@ -2685,9 +2794,10 @@ class MainWindow(QMainWindow):
         if not success:
             if hasattr(self, 'loading_dlg') and self.loading_dlg.isVisible():
                 self.loading_dlg.close()
-            QMessageBox.critical(
+            DetailedErrorDialog.show_error(
                 self, "Download Failed", 
-                f"Could not download the DnCNN AI model:\n{error_message}\n\nPlease verify your internet connection."
+                "Could not download the DnCNN AI model",
+                f"{error_message}\n\nPlease verify your internet connection."
             )
             self.set_status("DnCNN model download failed.")
             return
@@ -2721,7 +2831,7 @@ class MainWindow(QMainWindow):
         else:
             print(f"Error restoring {file_path}: {error_message}")
             self.set_status(f"Failed to restore: {os.path.basename(file_path)}")
-            QMessageBox.critical(self, "Restoration Error", f"Error restoring {os.path.basename(file_path)}:\n\n{error_message}")
+            DetailedErrorDialog.show_error(self, "Restoration Error", f"Error restoring {os.path.basename(file_path)}", error_message)
             
         self.process_next_batch_item()
         
@@ -2802,8 +2912,24 @@ class MainWindow(QMainWindow):
     # GOOGLE FONTS DOWNLOADER TAB IMPLEMENTATION
     # ==========================================
     def on_tab_changed(self, idx):
-        if idx == 4:
+        current_widget = self.tabs.currentWidget()
+        if hasattr(self, "btn_my_downloads"):
+            # Set connection if not already connected
+            try:
+                self.btn_my_downloads.clicked.disconnect()
+            except Exception:
+                pass
+            if current_widget == getattr(self, "ytdlp_tab", None):
+                self.btn_my_downloads.clicked.connect(self.ytdlp_tab.go_to_downloads_grid)
+            self.btn_my_downloads.setVisible(current_widget == getattr(self, "ytdlp_tab", None))
+            
+        if current_widget == getattr(self, "fonts_tab", None):
             self.set_status("Google Fonts Downloader active.")
+        elif current_widget == getattr(self, "ytdlp_tab", None):
+            self.set_status("YouTube Downloader (YTDLP) active.")
+            self.ytdlp_tab.focus_url_input()
+        elif current_widget == getattr(self, "browser_tab", None):
+            self.set_status("Browser active.")
         else:
             self.populate_grid()
 
@@ -3906,7 +4032,7 @@ class MainWindow(QMainWindow):
             
     def start_batch_icon_worker(self, file_path, current_num):
         from src.workers import IconGeneratorWorker, MetadataStripWorker
-        worker = IconGeneratorWorker, MetadataStripWorker(file_path)
+        worker = IconGeneratorWorker(file_path)
         worker.finished.connect(lambda success, result, error: self.on_batch_icon_finished(success, result, error, file_path, current_num))
         
         for card in self.icon_cards:
@@ -4023,3 +4149,65 @@ class MainWindow(QMainWindow):
                 break
                 
         self.process_next_batch_item()
+
+
+    def navigate_browser(self):
+        url = self.url_bar.text()
+        if not url.startswith("http"):
+            url = "https://duckduckgo.com/?q=" + url
+        from PySide6.QtCore import QUrl
+        self.webview.setUrl(QUrl(url))
+        
+    def download_image_to_workspace(self, url_str):
+        from src.workers import FileDownloadWorker
+        import os
+        from urllib.parse import urlparse
+        import time
+        
+        workspace = self.current_dirs[0] if getattr(self, 'current_dirs', None) else os.getcwd()
+        
+        path = urlparse(url_str).path
+        filename = os.path.basename(path)
+        if not filename or '.' not in filename:
+            filename = f"downloaded_img_{int(time.time())}.jpg"
+            
+        out_path = os.path.join(workspace, filename)
+        
+        # We need a fallback mechanism if the file exists
+        base, ext = os.path.splitext(out_path)
+        counter = 1
+        while os.path.exists(out_path):
+            out_path = f"{base}_{counter}{ext}"
+            counter += 1
+            
+        self.set_status(f"Downloading {os.path.basename(out_path)} to workspace...")
+        
+        worker = FileDownloadWorker(url_str, out_path)
+        if not hasattr(self, 'active_downloads'):
+            self.active_downloads = []
+        self.active_downloads.append(worker)
+        
+        worker.finished.connect(lambda success, error, w=worker, p=out_path: self.on_browser_download_finished(success, error, p, w))
+        worker.start()
+        
+    def on_browser_download_finished(self, success, error, path, worker):
+        if worker in getattr(self, 'active_downloads', []):
+            self.active_downloads.remove(worker)
+            
+        if success:
+            self.set_status(f"Downloaded {os.path.basename(path)}")
+            if hasattr(self, 'current_dirs') and self.current_dirs:
+                self.load_directories(self.current_dirs)
+        else:
+            self.set_status(f"Download failed: {error}")
+            import urllib.request
+            try:
+                # Fallback to direct urllib download just in case FileDownloadWorker hits a snag
+                req = urllib.request.Request(worker.url, headers={'User-Agent': 'Mozilla/5.0'})
+                with urllib.request.urlopen(req) as response, open(path, 'wb') as out_file:
+                    out_file.write(response.read())
+                self.set_status(f"Downloaded {os.path.basename(path)} (fallback)")
+                if hasattr(self, 'current_dirs') and self.current_dirs:
+                    self.load_directories(self.current_dirs)
+            except Exception as e:
+                self.show_toast(f"Download failed: {e}", "error")

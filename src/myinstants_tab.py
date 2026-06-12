@@ -9,7 +9,7 @@ from PySide6.QtCore import Qt, QTimer, Signal, QUrl
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtGui import QIcon
 from src.myinstants_worker import ScrapeWorker, DownloadWorker, target_path_for
-from src.dialogs import _tc  # theme token helper
+from src.dialogs import _tc, DetailedErrorDialog  # theme token helper
 
 
 
@@ -408,5 +408,5 @@ class MyInstantsTab(QWidget):
         if worker in self.active_workers:
             self.active_workers.remove(worker)
         self.set_item_downloading(item, False, 0)
-        QMessageBox.warning(self, "Download Failed", f"Failed to download {item['title']}: {err}")
+        DetailedErrorDialog.show_error(self, "Download Failed", f"Failed to download {item['title']}", err)
         self.process_queue()

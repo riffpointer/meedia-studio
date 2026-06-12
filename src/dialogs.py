@@ -1,6 +1,6 @@
 import os
 import time
-from PySide6.QtCore import Qt, QSize, QTimer, QEvent, QPoint, QByteArray
+from PySide6.QtCore import Qt, QSize, QTimer, QEvent, QPoint, QByteArray, QThread, Signal
 from PySide6.QtGui import QPixmap, QImage, QPainter, QBrush, QColor, QPalette
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QWidget, QLabel,
@@ -36,6 +36,153 @@ def get_accent_colors():
 
 from src.utils import pil_to_qimage
 from src.widgets import TransparentImageLabel, TransparentSvgLabel, RegionSelectLabel, ZoomPanImagePreview
+
+
+class DetailedErrorDialog(QDialog):
+    def __init__(self, title="Error", summary="An error occurred:", details="", parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setMinimumSize(500, 300)
+        self.setModal(True)
+        
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+        layout.setContentsMargins(20, 20, 20, 20)
+        
+        # Summary label
+        self.summary_label = QLabel(summary, self)
+        self.summary_label.setStyleSheet("font-weight: bold; font-size: 13px; color: %s;" % _tc()["text_bright"])
+        self.summary_label.setWordWrap(True)
+        layout.addWidget(self.summary_label)
+        
+        # Details text area
+        from PySide6.QtWidgets import QTextEdit
+        self.details_edit = QTextEdit(self)
+        self.details_edit.setReadOnly(True)
+        self.details_edit.setText(details)
+        self.details_edit.setStyleSheet("""
+            QTextEdit {
+                background-color: %s;
+                border: 1px solid %s;
+                border-radius: 4px;
+                color: %s;
+                font-family: Consolas, Monaco, monospace;
+                font-size: 11px;
+            }
+        """ % (_tc()["input_bg"], _tc()["border_subtle"], _tc()["text_muted"]))
+        layout.addWidget(self.details_edit, 1)
+        
+        # Close Button
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        self.btn_close = QPushButton("Close", self)
+        self.btn_close.setObjectName("cancelButton")
+        self.btn_close.clicked.connect(self.reject)
+        btn_layout.addWidget(self.btn_close)
+        layout.addLayout(btn_layout)
+        
+        # Style dialog matching theme
+        self.setStyleSheet("""
+            QPushButton {
+                background-color: %s;
+                border: 1px solid %s;
+                padding: 6px 12px;
+                border-radius: 4px;
+                color: %s;
+            }
+            QPushButton:hover {
+                background-color: %s;
+            }
+        """ % (_tc()["secondary_btn_bg"], _tc()["secondary_btn_border"], _tc()["text"], _tc()["secondary_btn_hover"]))
+
+    @staticmethod
+    def show_error(parent, title, summary, details):
+        dlg = DetailedErrorDialog(title, summary, details, parent)
+        dlg.exec()
+
+
+class FileDownloadProgressDialog(QDialog):
+    def __init__(self, url, dest_path, title="Downloading", parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setMinimumSize(400, 150)
+        self.setModal(True)
+        
+        self.url = url
+        self.dest_path = dest_path
+        
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+        layout.setContentsMargins(20, 20, 20, 20)
+        
+        self.status_label = QLabel("Initializing download...", self)
+        self.status_label.setStyleSheet("color: %s;" % _tc()["text"])
+        self.status_label.setWordWrap(True)
+        layout.addWidget(self.status_label)
+        
+        self.progress_bar = QProgressBar(self)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        layout.addWidget(self.progress_bar)
+        
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        self.btn_cancel = QPushButton("Cancel", self)
+        self.btn_cancel.setObjectName("cancelButton")
+        self.btn_cancel.clicked.connect(self.cancel_download)
+        btn_layout.addWidget(self.btn_cancel)
+        layout.addLayout(btn_layout)
+        
+        layout.addStretch()
+        
+        self.setStyleSheet("""
+            QPushButton {
+                background-color: %s;
+                border: 1px solid %s;
+                padding: 6px 12px;
+                border-radius: 4px;
+                color: %s;
+            }
+            QPushButton:hover {
+                background-color: %s;
+            }
+        """ % (_tc()["secondary_btn_bg"], _tc()["secondary_btn_border"], _tc()["text"], _tc()["secondary_btn_hover"]))
+        
+        from src.workers import FileDownloadWorker
+        self.worker = FileDownloadWorker(url, dest_path)
+        self.worker.progress.connect(self.on_progress)
+        self.worker.finished.connect(self.on_finished)
+        self.worker.start()
+        
+    def on_progress(self, percent, bytes_read, total_size):
+        if percent >= 0:
+            self.progress_bar.setValue(percent)
+            mb_read = bytes_read / (1024 * 1024)
+            mb_total = total_size / (1024 * 1024)
+            self.status_label.setText(f"Downloaded {mb_read:.2f} MB of {mb_total:.2f} MB ({percent}%)")
+        else:
+            self.progress_bar.setRange(0, 0)
+            mb_read = bytes_read / (1024 * 1024)
+            self.status_label.setText(f"Downloaded {mb_read:.2f} MB (size unknown)")
+            
+    def on_finished(self, success, error_message):
+        if success:
+            self.accept()
+        else:
+            if error_message != "Cancelled":
+                QMessageBox.critical(self, "Download Error", f"Failed to download file:\n{error_message}")
+            self.reject()
+            
+    def cancel_download(self):
+        self.status_label.setText("Cancelling download...")
+        self.worker.cancel()
+        self.worker.wait()
+        self.reject()
+        
+    def closeEvent(self, event):
+        self.cancel_download()
+        event.accept()
+
 
 class ConfirmDialog(QDialog):
     def __init__(self, file_path, parent=None):
@@ -1329,6 +1476,207 @@ class SettingsDialog(QDialog):
         
         self.tab_widget.addTab(self.fonts_tab, "Google Fonts")
         
+        # YTDLP Tab
+        self.ytdlp_tab = QWidget()
+        ytdlp_layout = QVBoxLayout(self.ytdlp_tab)
+        ytdlp_layout.setContentsMargins(12, 12, 12, 12)
+        ytdlp_layout.setSpacing(10)
+        
+        ytdlp_form = QWidget(self.ytdlp_tab)
+        ytdlp_grid = QGridLayout(ytdlp_form)
+        ytdlp_grid.setContentsMargins(0, 0, 0, 0)
+        ytdlp_grid.setSpacing(10)
+        
+        # Download folder path
+        ytdlp_grid.addWidget(QLabel("Download Folder:", ytdlp_form), 0, 0)
+        ytdlp_folder_layout = QHBoxLayout()
+        self.ytdlp_folder_edit = QLineEdit(ytdlp_form)
+        self.ytdlp_folder_edit.setText(self.settings.get("ytdlp_download_dir", os.path.join(os.path.expanduser("~"), "Downloads")))
+        self.btn_ytdlp_folder_browse = QPushButton("Browse...", ytdlp_form)
+        self.btn_ytdlp_folder_browse.setStyleSheet("""
+            QPushButton { background-color: %s; border: 1px solid %s; padding: 6px 12px; }
+            QPushButton:hover { background-color: %s; }
+        """ % (_tc()["secondary_btn_bg"], _tc()["secondary_btn_border"], _tc()["secondary_btn_hover"]))
+        self.btn_ytdlp_folder_browse.clicked.connect(self.on_browse_ytdlp_folder)
+        ytdlp_folder_layout.addWidget(self.ytdlp_folder_edit, 1)
+        ytdlp_folder_layout.addWidget(self.btn_ytdlp_folder_browse)
+        ytdlp_grid.addLayout(ytdlp_folder_layout, 0, 1)
+        
+        # Audio default settings
+        ytdlp_grid.addWidget(QLabel("Audio Format:", ytdlp_form), 1, 0)
+        self.ytdlp_audio_fmt_combo = QComboBox(ytdlp_form)
+        self.ytdlp_audio_fmt_combo.addItems(["mp3", "m4a", "wav", "flac", "opus", "aac"])
+        self.ytdlp_audio_fmt_combo.setCurrentText(self.settings.get("ytdlp_audio_format", "mp3"))
+        ytdlp_grid.addWidget(self.ytdlp_audio_fmt_combo, 1, 1)
+        
+        ytdlp_grid.addWidget(QLabel("Audio Quality:", ytdlp_form), 2, 0)
+        self.ytdlp_audio_qual_combo = QComboBox(ytdlp_form)
+        self.ytdlp_audio_qual_combo.addItems(["best (320 kbps)", "256 kbps", "128 kbps"])
+        self.ytdlp_audio_qual_combo.setCurrentText(self.settings.get("ytdlp_audio_quality", "best (320 kbps)"))
+        ytdlp_grid.addWidget(self.ytdlp_audio_qual_combo, 2, 1)
+        
+        # Video default settings
+        ytdlp_grid.addWidget(QLabel("Video Format:", ytdlp_form), 3, 0)
+        self.ytdlp_video_fmt_combo = QComboBox(ytdlp_form)
+        self.ytdlp_video_fmt_combo.addItems(["mp4", "mkv", "webm", "flv"])
+        self.ytdlp_video_fmt_combo.setCurrentText(self.settings.get("ytdlp_video_format", "mp4"))
+        ytdlp_grid.addWidget(self.ytdlp_video_fmt_combo, 3, 1)
+        
+        ytdlp_grid.addWidget(QLabel("Video Quality:", ytdlp_form), 4, 0)
+        self.ytdlp_video_qual_combo = QComboBox(ytdlp_form)
+        self.ytdlp_video_qual_combo.addItems(["best", "1080p", "720p", "480p"])
+        self.ytdlp_video_qual_combo.setCurrentText(self.settings.get("ytdlp_video_quality", "best"))
+        ytdlp_grid.addWidget(self.ytdlp_video_qual_combo, 4, 1)
+        
+        # Cookie Browser setting
+        ytdlp_grid.addWidget(QLabel("Auth Browser cookies:", ytdlp_form), 5, 0)
+        self.ytdlp_browser_combo = QComboBox(ytdlp_form)
+        self.ytdlp_browser_combo.addItems(["None", "chrome", "firefox", "edge", "brave", "safari", "opera"])
+        self.ytdlp_browser_combo.setCurrentText(self.settings.get("ytdlp_auth_browser", "None"))
+        ytdlp_grid.addWidget(self.ytdlp_browser_combo, 5, 1)
+        
+        # Checkboxes
+        checkbox_widget = QWidget(ytdlp_form)
+        checkbox_layout = QHBoxLayout(checkbox_widget)
+        checkbox_layout.setContentsMargins(0, 0, 0, 0)
+        checkbox_layout.setSpacing(12)
+        
+        self.ytdlp_metadata_check = QCheckBox("Embed Metadata", checkbox_widget)
+        self.ytdlp_metadata_check.setChecked(self.settings.get("ytdlp_embed_metadata", True))
+        self.ytdlp_thumbnail_check = QCheckBox("Embed Thumbnail", checkbox_widget)
+        self.ytdlp_thumbnail_check.setChecked(self.settings.get("ytdlp_embed_thumbnail", True))
+        self.ytdlp_crop_thumbnail_check = QCheckBox("Square Crop Thumbnail", checkbox_widget)
+        self.ytdlp_crop_thumbnail_check.setChecked(self.settings.get("ytdlp_crop_thumbnail", True))
+        self.ytdlp_show_downloads_check = QCheckBox("Show Recent Downloads Table", checkbox_widget)
+        self.ytdlp_show_downloads_check.setChecked(self.settings.get("ytdlp_show_recent_downloads", True))
+        
+        checkbox_layout.addWidget(self.ytdlp_metadata_check)
+        checkbox_layout.addWidget(self.ytdlp_thumbnail_check)
+        checkbox_layout.addWidget(self.ytdlp_crop_thumbnail_check)
+        checkbox_layout.addWidget(self.ytdlp_show_downloads_check)
+        ytdlp_grid.addWidget(checkbox_widget, 6, 0, 1, 2)
+        
+        # Shortcuts and manager
+        ytdlp_grid.addWidget(QLabel("Tool Management:", ytdlp_form), 7, 0)
+        self.btn_tool_manager = QPushButton("Tool Manager", ytdlp_form)
+        self.btn_tool_manager.setStyleSheet("""
+            QPushButton {
+                background-color: %s;
+                border: 1px solid %s;
+                padding: 6px 12px;
+                border-radius: 4px;
+                color: %s;
+            }
+            QPushButton:hover {
+                background-color: %s;
+            }
+        """ % (_tc()["secondary_btn_bg"], _tc()["secondary_btn_border"], _tc()["text"], _tc()["secondary_btn_hover"]))
+        ytdlp_grid.addWidget(self.btn_tool_manager, 7, 1, Qt.AlignLeft)
+        
+        ytdlp_layout.addWidget(ytdlp_form)
+        ytdlp_layout.addStretch()
+        
+        self.tab_widget.addTab(self.ytdlp_tab, "YTDLP")
+        
+        # Browser settings tab
+        self.browser_settings_tab = QWidget()
+        browser_layout = QVBoxLayout(self.browser_settings_tab)
+        browser_layout.setContentsMargins(12, 12, 12, 12)
+        browser_layout.setSpacing(10)
+        
+        browser_form = QWidget(self.browser_settings_tab)
+        browser_grid = QGridLayout(browser_form)
+        browser_grid.setContentsMargins(0, 0, 0, 0)
+        browser_grid.setSpacing(10)
+        
+        # Homepage
+        browser_grid.addWidget(QLabel("Homepage:", browser_form), 0, 0)
+        
+        self.browser_homepage_combo = QComboBox(browser_form)
+        self.browser_homepage_combo.addItems([
+            "Google Search",
+            "Google Image Search",
+            "DuckDuckGo Search",
+            "DuckDuckGo Image Search",
+            "Pinterest",
+            "PNGWing",
+            "Bing Images",
+            "Custom"
+        ])
+        
+        self.homepage_presets = {
+            "Google Search": "https://www.google.com",
+            "Google Image Search": "https://www.google.com/imghp",
+            "DuckDuckGo Search": "https://duckduckgo.com",
+            "DuckDuckGo Image Search": "https://duckduckgo.com/?iax=images&ia=images",
+            "Pinterest": "https://www.pinterest.com",
+            "PNGWing": "https://www.pngwing.com",
+            "Bing Images": "https://www.bing.com/images",
+        }
+        
+        saved_homepage = self.settings.get("browser_homepage", "https://www.google.com")
+        
+        # Match saved URL to preset key or default to Custom
+        matched_preset = "Custom"
+        for preset_name, preset_url in self.homepage_presets.items():
+            if saved_homepage == preset_url:
+                matched_preset = preset_name
+                break
+                
+        self.browser_homepage_combo.setCurrentText(matched_preset)
+        browser_grid.addWidget(self.browser_homepage_combo, 0, 1)
+        
+        # Custom Homepage LineEdit
+        self.custom_homepage_row = QWidget(browser_form)
+        custom_layout = QHBoxLayout(self.custom_homepage_row)
+        custom_layout.setContentsMargins(0, 0, 0, 0)
+        custom_layout.setSpacing(10)
+        custom_layout.addWidget(QLabel("Custom URL:", self.custom_homepage_row))
+        self.browser_homepage_edit = QLineEdit(self.custom_homepage_row)
+        self.browser_homepage_edit.setText(saved_homepage)
+        self.browser_homepage_edit.setStyleSheet("""
+            QLineEdit {{
+                background-color: {input_bg};
+                border: 1px solid {scrollbar_handle};
+                border-radius: 4px;
+                padding: 6px 12px;
+                color: {text};
+            }}
+        """.format(**_tc()))
+        custom_layout.addWidget(self.browser_homepage_edit, 1)
+        
+        browser_grid.addWidget(self.custom_homepage_row, 1, 0, 1, 2)
+        self.custom_homepage_row.setVisible(matched_preset == "Custom")
+        
+        # Connect combobox switch handler
+        self.browser_homepage_combo.currentTextChanged.connect(self.on_homepage_preset_changed)
+        
+        # Configure Pools Button
+        browser_grid.addWidget(QLabel("Media Pools:", browser_form), 2, 0)
+        self.btn_configure_pools = QPushButton("Configure Pool Paths...", browser_form)
+        self.btn_configure_pools.setStyleSheet("""
+            QPushButton {{
+                background-color: {secondary_btn_bg};
+                border: 1px solid {secondary_btn_border};
+                padding: 6px 12px;
+                border-radius: 4px;
+                color: {text};
+            }}
+            QPushButton:hover {{
+                background-color: {secondary_btn_hover};
+            }}
+        """.format(**_tc()))
+        browser_grid.addWidget(self.btn_configure_pools, 1, 1, Qt.AlignLeft)
+
+        browser_layout.addWidget(browser_form)
+        browser_layout.addStretch()
+        
+        self.tab_widget.addTab(self.browser_settings_tab, "Browser")
+        
+        # Connect signals
+        self.btn_tool_manager.clicked.connect(self.on_open_tool_manager)
+        self.btn_configure_pools.clicked.connect(self.on_configure_pools)
+        
         layout.addWidget(self.tab_widget)
         layout.addStretch()
         
@@ -1417,6 +1765,39 @@ class SettingsDialog(QDialog):
             "'{family} {variant_pretty}' -> 'Roboto Bold Italic.ttf'"
         )
             
+    def on_open_tool_manager(self):
+        # Open the ToolManagerDialog
+        dlg = ToolManagerDialog(self)
+        dlg.exec()
+
+    def on_browse_ytdlp_folder(self):
+        folder = QFileDialog.getExistingDirectory(self, "Select YTDLP Download Folder", self.ytdlp_folder_edit.text() or os.getcwd())
+        if folder:
+            self.ytdlp_folder_edit.setText(folder)
+
+    def on_browse_browser_img_folder(self):
+        folder = QFileDialog.getExistingDirectory(self, "Select Browser Image Pool Folder", self.browser_img_edit.text() or os.getcwd())
+        if folder:
+            self.browser_img_edit.setText(folder)
+
+    def on_browse_browser_vid_folder(self):
+        folder = QFileDialog.getExistingDirectory(self, "Select Browser Video Pool Folder", self.browser_vid_edit.text() or os.getcwd())
+        if folder:
+            self.browser_vid_edit.setText(folder)
+
+    def on_configure_pools(self):
+        from src.browser_pool_config_dialog import BrowserPoolConfigDialog
+        dlg = BrowserPoolConfigDialog(self.settings, self)
+        if dlg.exec() == QDialog.Accepted:
+            self.settings.update(dlg.settings)
+
+    def on_homepage_preset_changed(self, text):
+        is_custom = (text == "Custom")
+        self.custom_homepage_row.setVisible(is_custom)
+        if not is_custom:
+            preset_url = self.homepage_presets.get(text, "https://www.google.com")
+            self.browser_homepage_edit.setText(preset_url)
+
     def on_save(self):
         self.settings["ask_confirm"] = self.confirm_check.isChecked()
         self.settings["primary_folder"] = self.folder_edit.text()
@@ -1430,6 +1811,25 @@ class SettingsDialog(QDialog):
         self.settings["font_flat_download"] = self.font_flat_check.isChecked()
         self.settings["font_delete_after_zip"] = self.font_delete_check.isChecked()
         self.settings["font_format"] = self.font_format_combo.currentText()
+        
+        # Save YTDLP Settings
+        self.settings["ytdlp_download_dir"] = self.ytdlp_folder_edit.text()
+        self.settings["ytdlp_audio_format"] = self.ytdlp_audio_fmt_combo.currentText()
+        self.settings["ytdlp_audio_quality"] = self.ytdlp_audio_qual_combo.currentText()
+        self.settings["ytdlp_video_format"] = self.ytdlp_video_fmt_combo.currentText()
+        self.settings["ytdlp_video_quality"] = self.ytdlp_video_qual_combo.currentText()
+        self.settings["ytdlp_auth_browser"] = self.ytdlp_browser_combo.currentText()
+        self.settings["ytdlp_embed_metadata"] = self.ytdlp_metadata_check.isChecked()
+        self.settings["ytdlp_embed_thumbnail"] = self.ytdlp_thumbnail_check.isChecked()
+        self.settings["ytdlp_crop_thumbnail"] = self.ytdlp_crop_thumbnail_check.isChecked()
+        self.settings["ytdlp_show_recent_downloads"] = self.ytdlp_show_downloads_check.isChecked()
+
+        # Save Browser Settings
+        preset_name = self.browser_homepage_combo.currentText()
+        if preset_name == "Custom":
+            self.settings["browser_homepage"] = self.browser_homepage_edit.text()
+        else:
+            self.settings["browser_homepage"] = self.homepage_presets.get(preset_name, "https://www.google.com")
         
         self.accept()
 
@@ -2336,3 +2736,433 @@ class BatchMetadataConfirmDialog(QDialog):
         
         self.btn_yes.clicked.connect(self.accept)
         self.btn_no.clicked.connect(self.reject)
+
+
+class ToolInfoLoader(QThread):
+    loaded = Signal(list) # List of (tool, path, version, size)
+    
+    def __init__(self, tools, parent_dialog):
+        super().__init__(parent_dialog)
+        self.tools = tools
+        self.dialog = parent_dialog
+        
+    def run(self):
+        results = []
+        for tool in self.tools:
+            path, version, size = self.dialog.get_tool_info(tool)
+            results.append((tool, path, version, size))
+        self.loaded.emit(results)
+
+
+class ToolManagerDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Tool Manager")
+        self.setMinimumSize(700, 350)
+        self.setModal(True)
+        
+        layout = QVBoxLayout(self)
+        layout.setSpacing(16)
+        layout.setContentsMargins(20, 20, 20, 20)
+        
+        # Table widget setup
+        from PySide6.QtWidgets import QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QHBoxLayout, QProgressBar
+        
+        self.progress_bar = QProgressBar(self)
+        self.progress_bar.setRange(0, 0) # Indeterminate style
+        self.progress_bar.setTextVisible(False)
+        self.progress_bar.setStyleSheet("""
+            QProgressBar {
+                border: 1px solid %s;
+                border-radius: 4px;
+                background-color: %s;
+                height: 8px;
+            }
+            QProgressBar::chunk {
+                background-color: %s;
+                border-radius: 4px;
+            }
+        """ % (_tc()["border"], _tc()["input_bg"], _tc()["accent"]))
+        layout.addWidget(self.progress_bar)
+        
+        self.table = QTableWidget(self)
+        self.table.setColumnCount(5)
+        self.table.setHorizontalHeaderLabels(["Tool", "Installed Version", "Install Size", "Actions", ""])
+        self.table.setSelectionMode(QAbstractItemView.NoSelection)
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.setAlternatingRowColors(True)
+        
+        # Table Styling matching themes
+        tc = _tc()
+        self.table.setStyleSheet(f"""
+            QTableWidget {{
+                background-color: {tc["input_bg"]};
+                gridline-color: {tc["border_subtle"]};
+                color: {tc["text"]};
+                border: 1px solid {tc["border"]};
+                border-radius: 6px;
+            }}
+            QHeaderView::section {{
+                background-color: {tc["secondary_btn_bg"]};
+                color: {tc["text_bright"]};
+                border: 1px solid {tc["border_subtle"]};
+                padding: 6px;
+                font-weight: bold;
+            }}
+        """)
+        
+        layout.addWidget(self.table)
+        
+        # Load buttons
+        btn_layout = QHBoxLayout()
+        
+        # Update tools link moved here as a button
+        self.btn_update_tools = QPushButton("Update Tools", self)
+        self.btn_update_tools.setStyleSheet("""
+            QPushButton {
+                background-color: %s;
+                border: 1px solid %s;
+                padding: 6px 12px;
+                border-radius: 4px;
+                color: %s;
+            }
+            QPushButton:hover {
+                background-color: %s;
+            }
+        """ % (_tc()["secondary_btn_bg"], _tc()["secondary_btn_border"], _tc()["text"], _tc()["secondary_btn_hover"]))
+        self.btn_update_tools.clicked.connect(self.on_update_tools_click)
+        btn_layout.addWidget(self.btn_update_tools)
+        
+        btn_layout.addStretch()
+        self.btn_close = QPushButton("Close", self)
+        self.btn_close.setObjectName("cancelButton")
+        self.btn_close.clicked.connect(self.reject)
+        btn_layout.addWidget(self.btn_close)
+        layout.addLayout(btn_layout)
+        
+        self.loader_thread = None
+        self.refresh_table()
+
+    def on_update_tools_click(self):
+        self.close()
+        # Find main window to trigger update_tools
+        from src.main_window import MainWindow
+        parent_win = self.parent()
+        while parent_win and not isinstance(parent_win, MainWindow):
+            parent_win = parent_win.parent()
+        if parent_win and hasattr(parent_win, "ytdlp_tab"):
+            parent_win.ytdlp_tab.update_tools()
+
+    def refresh_table(self):
+        self.table.setVisible(False)
+        self.progress_bar.setVisible(True)
+        self.btn_update_tools.setEnabled(False)
+        self.btn_close.setEnabled(False)
+        
+        tools = ["yt-dlp", "Deno", "FFmpeg/ffprobe"]
+        self.loader_thread = ToolInfoLoader(tools, self)
+        self.loader_thread.loaded.connect(self.on_info_loaded)
+        self.loader_thread.start()
+        
+    def on_info_loaded(self, results):
+        self.table.setRowCount(0)
+        self.table.setRowCount(len(results))
+        
+        from PySide6.QtWidgets import QTableWidgetItem, QWidget, QHBoxLayout, QPushButton
+        from PySide6.QtGui import QIcon
+        import sys
+        
+        for i, (tool, path, version, size) in enumerate(results):
+            # Tool Name
+            item_name = QTableWidgetItem(tool)
+            item_name.setToolTip(path if path else "Not installed")
+            self.table.setItem(i, 0, item_name)
+            
+            # Version
+            item_ver = QTableWidgetItem(version)
+            item_ver.setToolTip(path if path else "Not installed")
+            self.table.setItem(i, 1, item_ver)
+            
+            # Size
+            item_size = QTableWidgetItem(size)
+            item_size.setToolTip(path if path else "Not installed")
+            self.table.setItem(i, 2, item_size)
+            
+            # Action buttons
+            actions_widget = QWidget()
+            actions_layout = QHBoxLayout(actions_widget)
+            actions_layout.setContentsMargins(4, 2, 4, 2)
+            actions_layout.setSpacing(6)
+            
+            btn_dl = QPushButton()
+            btn_dl.setIcon(QIcon("res/icons/bootstrap-png/download.png"))
+            btn_dl.setToolTip("Download / Update")
+            btn_dl.clicked.connect(lambda checked=False, t=tool: self.download_tool(t))
+            
+            btn_del = QPushButton()
+            btn_del.setIcon(QIcon("res/icons/bootstrap-png/trash.png"))
+            btn_del.setToolTip("Delete Local Copy")
+            btn_del.setEnabled(path != "" and "(System)" not in version)
+            btn_del.clicked.connect(lambda checked=False, t=tool: self.delete_tool(t))
+            
+            btn_open = QPushButton()
+            btn_open.setIcon(QIcon("res/icons/bootstrap-png/folder2-open.png"))
+            btn_open.setToolTip("Open Folder Location")
+            btn_open.setEnabled(path != "")
+            btn_open.clicked.connect(lambda checked=False, t=tool: self.open_tool_location(t))
+            
+            # Icon styling
+            tc = _tc()
+            btn_style = f"""
+                QPushButton {{
+                    background-color: {tc["secondary_btn_bg"]};
+                    border: 1px solid {tc["secondary_btn_border"]};
+                    border-radius: 4px;
+                    height: 28px;
+                }}
+                QPushButton:hover {{
+                    background-color: {tc["secondary_btn_hover"]};
+                }}
+                QPushButton:disabled {{
+                    opacity: 0.5;
+                    background-color: transparent;
+                }}
+            """
+            btn_dl.setStyleSheet(btn_style)
+            btn_del.setStyleSheet(btn_style)
+            btn_open.setStyleSheet(btn_style)
+            
+            # Add with flex: 1 so they take equal width
+            actions_layout.addWidget(btn_dl, 1)
+            actions_layout.addWidget(btn_del, 1)
+            actions_layout.addWidget(btn_open, 1)
+            
+            self.table.setCellWidget(i, 3, actions_widget)
+            
+        from PySide6.QtWidgets import QHeaderView
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        
+        self.progress_bar.setVisible(False)
+        self.table.setVisible(True)
+        self.btn_update_tools.setEnabled(True)
+        self.btn_close.setEnabled(True)
+            
+        from PySide6.QtWidgets import QHeaderView
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
+
+    def get_tool_info(self, name):
+        import shutil
+        import sys
+        import subprocess
+        from src.utils import get_app_data_dir
+        
+        path = ""
+        version = "Not Installed"
+        size = "0.00 MB"
+        suffix = ".exe" if sys.platform == "win32" else ""
+        
+        if name == "yt-dlp":
+            from src.ytdlp_tab import get_ytdlp_path
+            ytdlp_path = get_ytdlp_path()
+            if os.path.exists(ytdlp_path):
+                path = ytdlp_path
+                try:
+                    res = subprocess.run([path, "--version"], capture_output=True, text=True, timeout=2)
+                    version = res.stdout.strip()
+                except Exception:
+                    version = "Installed"
+                try:
+                    size = f"{os.path.getsize(path) / (1024 * 1024):.2f} MB"
+                except OSError:
+                    pass
+                    
+        elif name == "Deno":
+            deno_path = os.path.join(get_app_data_dir(), "bin", f"deno{suffix}")
+            system_path = shutil.which("deno")
+            if os.path.exists(deno_path):
+                path = deno_path
+                try:
+                    res = subprocess.run([path, "--version"], capture_output=True, text=True, timeout=2)
+                    version = res.stdout.split("\n")[0].replace("deno ", "").strip()
+                except Exception:
+                    version = "Installed"
+                try:
+                    size = f"{os.path.getsize(path) / (1024 * 1024):.2f} MB"
+                except OSError:
+                    pass
+            elif system_path:
+                path = system_path
+                try:
+                    res = subprocess.run([path, "--version"], capture_output=True, text=True, timeout=2)
+                    version = res.stdout.split("\n")[0].replace("deno ", "").strip() + " (System)"
+                except Exception:
+                    version = "Installed (System)"
+                    
+        elif name == "FFmpeg/ffprobe":
+            ffmpeg_path = os.path.join(get_app_data_dir(), "bin", f"ffmpeg{suffix}")
+            ffprobe_path = os.path.join(get_app_data_dir(), "bin", f"ffprobe{suffix}")
+            system_ffmpeg = shutil.which("ffmpeg")
+            system_ffprobe = shutil.which("ffprobe")
+            
+            if os.path.exists(ffmpeg_path) and os.path.exists(ffprobe_path):
+                path = f"{ffmpeg_path} & {ffprobe_path}"
+                try:
+                    res = subprocess.run([ffmpeg_path, "-version"], capture_output=True, text=True, timeout=2)
+                    version = res.stdout.split("\n")[0].replace("ffmpeg version ", "").split(" ")[0].strip()
+                except Exception:
+                    version = "Installed"
+                try:
+                    total_sz = os.path.getsize(ffmpeg_path) + os.path.getsize(ffprobe_path)
+                    size = f"{total_sz / (1024 * 1024):.2f} MB"
+                except OSError:
+                    pass
+            elif system_ffmpeg and system_ffprobe:
+                path = f"{system_ffmpeg} & {system_ffprobe}"
+                try:
+                    res = subprocess.run([system_ffmpeg, "-version"], capture_output=True, text=True, timeout=2)
+                    version = res.stdout.split("\n")[0].replace("ffmpeg version ", "").split(" ")[0].strip() + " (System)"
+                except Exception:
+                    version = "Installed (System)"
+                    
+        return path, version, size
+
+    def download_tool(self, name):
+        from src.dialogs import FileDownloadProgressDialog
+        from src.utils import get_app_data_dir
+        bin_dir = os.path.join(get_app_data_dir(), "bin")
+        os.makedirs(bin_dir, exist_ok=True)
+        suffix = ".exe" if sys.platform == "win32" else ""
+        
+        if name == "yt-dlp":
+            from src.ytdlp_tab import get_ytdlp_path
+            path = get_ytdlp_path()
+            url = f"https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp{suffix}"
+            dlg = FileDownloadProgressDialog(url, path, "Downloading yt-dlp", self)
+            if dlg.exec() == QDialog.Accepted:
+                if sys.platform != "win32":
+                    try: os.chmod(path, 0o755)
+                    except: pass
+                self.refresh_table()
+                
+        elif name == "Deno":
+            from src.ytdlp_tab import get_deno_download_url
+            url = get_deno_download_url()
+            zip_path = os.path.join(bin_dir, "deno.zip")
+            dlg = FileDownloadProgressDialog(url, zip_path, "Downloading Deno", self)
+            if dlg.exec() == QDialog.Accepted:
+                try:
+                    import zipfile
+                    with zipfile.ZipFile(zip_path, 'r') as zr:
+                        zr.extractall(bin_dir)
+                    try: os.remove(zip_path)
+                    except: pass
+                    deno_path = os.path.join(bin_dir, f"deno{suffix}")
+                    if sys.platform != "win32":
+                        try: os.chmod(deno_path, 0o755)
+                        except: pass
+                except Exception as e:
+                    QMessageBox.warning(self, "Error", f"Failed to extract Deno: {e}")
+                self.refresh_table()
+                
+        elif name == "FFmpeg/ffprobe":
+            from src.ytdlp_tab import get_ffmpeg_urls
+            ffmpeg_url, ffprobe_url = get_ffmpeg_urls()
+            
+            ffmpeg_zip = os.path.join(bin_dir, "ffmpeg.zip")
+            dlg1 = FileDownloadProgressDialog(ffmpeg_url, ffmpeg_zip, "Downloading FFmpeg", self)
+            if dlg1.exec() != QDialog.Accepted:
+                return
+                
+            ffprobe_zip = os.path.join(bin_dir, "ffprobe.zip")
+            dlg2 = FileDownloadProgressDialog(ffprobe_url, ffprobe_zip, "Downloading ffprobe", self)
+            if dlg2.exec() != QDialog.Accepted:
+                return
+                
+            try:
+                import zipfile
+                for zip_path in [ffmpeg_zip, ffprobe_zip]:
+                    with zipfile.ZipFile(zip_path, 'r') as zr:
+                        zr.extractall(bin_dir)
+                    try: os.remove(zip_path)
+                    except: pass
+                if sys.platform != "win32":
+                    for tool in ["ffmpeg", "ffprobe"]:
+                        p = os.path.join(bin_dir, tool)
+                        if os.path.exists(p):
+                            try: os.chmod(p, 0o755)
+                            except: pass
+            except Exception as e:
+                QMessageBox.warning(self, "Error", f"Failed to extract FFmpeg/ffprobe: {e}")
+            self.refresh_table()
+
+    def delete_tool(self, name):
+        reply = QMessageBox.question(self, "Confirm Delete", f"Are you sure you want to delete local copy of {name}?", QMessageBox.Yes | QMessageBox.No)
+        if reply != QMessageBox.Yes:
+            return
+            
+        import sys, os
+        from src.utils import get_app_data_dir
+        suffix = ".exe" if sys.platform == "win32" else ""
+        bin_dir = os.path.join(get_app_data_dir(), "bin")
+        
+        try:
+            if name == "yt-dlp":
+                from src.ytdlp_tab import get_ytdlp_path
+                path = get_ytdlp_path()
+                if os.path.exists(path):
+                    os.remove(path)
+            elif name == "Deno":
+                path = os.path.join(bin_dir, f"deno{suffix}")
+                if os.path.exists(path):
+                    os.remove(path)
+            elif name == "FFmpeg/ffprobe":
+                for tool in ["ffmpeg", "ffprobe"]:
+                    path = os.path.join(bin_dir, f"{tool}{suffix}")
+                    if os.path.exists(path):
+                        os.remove(path)
+            self.refresh_table()
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to delete {name}: {e}")
+
+    def open_tool_location(self, name):
+        import sys, os, subprocess
+        from src.utils import get_app_data_dir
+        suffix = ".exe" if sys.platform == "win32" else ""
+        bin_dir = os.path.join(get_app_data_dir(), "bin")
+        path = ""
+        if name == "yt-dlp":
+            from src.ytdlp_tab import get_ytdlp_path
+            path = get_ytdlp_path()
+        elif name == "Deno":
+            path = os.path.join(bin_dir, f"deno{suffix}")
+        elif name == "FFmpeg/ffprobe":
+            path = os.path.join(bin_dir, f"ffmpeg{suffix}")
+            
+        if not os.path.exists(path):
+            path = bin_dir
+            
+        norm_path = os.path.normpath(path)
+        try:
+            if sys.platform == "win32":
+                if os.path.isdir(norm_path):
+                    os.startfile(norm_path)
+                else:
+                    subprocess.run(f'explorer /select,"{norm_path}"')
+            elif sys.platform == "darwin":
+                if os.path.isdir(norm_path):
+                    subprocess.run(["open", norm_path])
+                else:
+                    subprocess.run(["open", "-R", norm_path])
+            else:
+                dir_path = os.path.dirname(norm_path) if os.path.isfile(norm_path) else norm_path
+                subprocess.run(["xdg-open", dir_path])
+        except Exception:
+            pass

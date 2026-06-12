@@ -1,0 +1,1 @@
+currently the grid layout is center-aligned, i.e if there are not enough columns or rows to fill the window, cards get gravitated towards the center of the window, don't do it, instead align it to the top center of the container. so the cards will be aligned from top center to bottom center (left align vertical, center align horizontal).

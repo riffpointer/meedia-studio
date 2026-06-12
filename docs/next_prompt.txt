@@ -1,0 +1,11 @@
+1.
+
+Traceback (most recent call last):
+    File "C:\Users\User\Documents\GitHub\meedia-studio\src\ytdlp_tab.py", line 1704, in show_hide_downloads_menu
+      menu = QMenu(self)
+             ^^^^^
+  NameError: name 'QMenu' is not defined. also move my downloads to the area where clean duplicates button is in
+
+
+2.
+

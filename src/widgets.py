@@ -5,7 +5,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import (
     QPixmap, QPainter, QBrush, QColor, QDrag, QClipboard,
-    QPen, QConicalGradient
+    QPen, QConicalGradient, QPainterPath
 )
 from PySide6.QtWidgets import (
     QProxyStyle,
@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QStyleOptionButton,
     QFrame, QVBoxLayout, QHBoxLayout, QCheckBox, QLabel, QWidget,
     QGraphicsDropShadowEffect, QMenu, QApplication, QTabBar, QStyle,
-    QStyleOptionTab, QStylePainter, QScrollArea, QGraphicsOpacityEffect, QPushButton
+    QStyleOptionTab, QStylePainter, QScrollArea, QGraphicsOpacityEffect, QPushButton, QProgressBar
 )
 from PySide6.QtSvg import QSvgRenderer
 
@@ -196,7 +196,6 @@ class ToastNotification(QWidget):
             QFrame#ToastCard {{
                 background-color: #16161e;
                 border: 1px solid {accent};
-                border-left: 4px solid {accent};
                 border-radius: 10px;
             }}
         """)
@@ -273,13 +272,11 @@ class ToastNotification(QWidget):
         self._fade_in.setEndValue(1.0)
         self._fade_in.setEasingCurve(QEasingCurve.OutCubic)
 
-        # ── Fade-out animation ────────────────────────────────────────────────
-        self._fade_out = QPropertyAnimation(self._opacity_fx, b"opacity", self)
-        self._fade_out.setDuration(self._SLIDE_OUT_MS)
-        self._fade_out.setStartValue(1.0)
-        self._fade_out.setEndValue(0.0)
-        self._fade_out.setEasingCurve(QEasingCurve.InCubic)
-        self._fade_out.finished.connect(self.close)
+        # ── Slide-out animation on dismiss ────────────────────────────────────
+        self._slide_out = QPropertyAnimation(self, b"pos", self)
+        self._slide_out.setDuration(self._SLIDE_OUT_MS)
+        self._slide_out.setEasingCurve(QEasingCurve.InCubic)
+        self._slide_out.finished.connect(self.close)
 
         # ── Countdown progress bar timer ──────────────────────────────────────
         self._elapsed = 0
@@ -327,7 +324,16 @@ class ToastNotification(QWidget):
     def _dismiss(self):
         self._auto_timer.stop()
         self._countdown.stop()
-        self._fade_out.start()
+        
+        # Setup slide-out animation destination: slide down off screen
+        p = self.parent()
+        if p:
+            from PySide6.QtCore import QPoint as _QPoint
+            self._slide_out.setStartValue(self.pos())
+            self._slide_out.setEndValue(_QPoint(self.x(), p.height() + 20))
+            self._slide_out.start()
+        else:
+            self.close()
 
     # ── Keep toast in corner if window is resized ─────────────────────────────
     def _on_parent_resized(self):
@@ -672,7 +678,8 @@ class ImageCard(QFrame):
         self.card_type = 'bg'  # Setup identifier to check tab scope ('bg', 'up', or 'vec')
         self.setCursor(Qt.PointingHandCursor)
         self.setObjectName("ImageCard")
-        self.setFixedSize(170, 210)
+        self.setMinimumWidth(160)
+        self.setFixedHeight(210)
         self.drag_start_position = QPoint()
         
         # Enable Custom Context Menu
@@ -742,7 +749,7 @@ class ImageCard(QFrame):
         
         self.checkbox = QCheckBox(self)
         self.checkbox.setObjectName("cardCheckbox")
-        self.checkbox.move(136, 8)
+        self.checkbox.move(8, 8)
         self.checkbox.stateChanged.connect(self.on_checkbox_changed)
 
         # Info badge — created lazily on first hover, dimensions cached then
@@ -805,6 +812,11 @@ class ImageCard(QFrame):
                                       self.height())
         self._spinner._opacity_fx.setOpacity(1.0)
         self._spinner.mark_error()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, 'checkbox') and self.checkbox:
+            self.checkbox.move(8, 8)
 
     def showEvent(self, event):
         super().showEvent(event)
