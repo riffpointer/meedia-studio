@@ -814,6 +814,12 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(500, self.fetch_fonts_catalog)
         
         main_layout.addWidget(self.tabs, 1)
+        
+        # Restore last active tab
+        last_tab = self.settings.get("last_active_tab", 0)
+        if 0 <= last_tab < self.tabs.count():
+            self.tabs.setCurrentIndex(last_tab)
+            
         self.tabs.currentChanged.connect(self.on_tab_changed)
         
         # Repurposed bottom labels as status bar text
@@ -879,6 +885,17 @@ class MainWindow(QMainWindow):
             
         self.load_directories(self.current_dirs)
         
+    def update_browser_tab_audio_state(self, playing):
+        browser_idx = -1
+        for i in range(self.tabs.count()):
+            if self.tabs.widget(i) == self.browser_tab:
+                browser_idx = i
+                break
+        if browser_idx != -1:
+            tab_bar = self.tabs.tabBar()
+            if hasattr(tab_bar, "set_pulse_active"):
+                tab_bar.set_pulse_active(browser_idx, playing)
+
     # ── Keyboard Shortcut Registration ───────────────────────────────────────
     def _register_shortcuts(self):
         """Bind all application-level keyboard shortcuts."""
@@ -2912,6 +2929,9 @@ class MainWindow(QMainWindow):
     # GOOGLE FONTS DOWNLOADER TAB IMPLEMENTATION
     # ==========================================
     def on_tab_changed(self, idx):
+        self.settings["last_active_tab"] = idx
+        self.save_app_settings()
+        
         current_widget = self.tabs.currentWidget()
         if hasattr(self, "btn_my_downloads"):
             # Set connection if not already connected

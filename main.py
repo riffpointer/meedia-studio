@@ -63,7 +63,34 @@ QTabWidget.__init__ = _new_tab_init
 
 
 if __name__ == "__main__":
-    app = QApplication(sys.argv)
+    dns_args = []
+    try:
+        import json
+        settings_path = os.path.join(get_app_data_dir(), "settings.json")
+        if os.path.exists(settings_path):
+            with open(settings_path, 'r') as f:
+                settings = json.load(f)
+                dns_type = settings.get("browser_dns_type", "Default")
+                custom_doh = settings.get("browser_custom_dns_doh", "")
+                doh_url = ""
+                if dns_type == "AdGuard":
+                    doh_url = "https://dns.adguard-dns.com/dns-query"
+                elif dns_type == "Cloudflare":
+                    doh_url = "https://cloudflare-dns.com/dns-query"
+                elif dns_type == "Google":
+                    doh_url = "https://dns.google/dns-query"
+                elif dns_type == "Custom" and custom_doh:
+                    doh_url = custom_doh
+                
+                if doh_url:
+                    dns_args = [
+                        "--enable-features=dns-over-https",
+                        f"--doh-templates={doh_url}"
+                    ]
+    except Exception as e:
+        print(f"Error loading DNS settings: {e}")
+        
+    app = QApplication(sys.argv + dns_args)
     from src.widgets import LeftAlignTabProxy
     app.setStyle(LeftAlignTabProxy(app.style()))
     

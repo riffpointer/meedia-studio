@@ -159,6 +159,8 @@ class YTFormatFetcherWorker(QThread):
 
 class YTDownloadWorker(QThread):
     progress = Signal(float, str, str, str, str) # percent, speed, eta, downloaded, total
+    filename_detected = Signal(str)
+    log_line = Signal(str)
     finished = Signal(bool, str) # success, error_message
     
     def __init__(self, cmd):
@@ -200,7 +202,19 @@ class YTDownloadWorker(QThread):
                     break
                 
                 output_lines.append(line)
+                self.log_line.emit(line.rstrip('\r\n'))
                 
+                if "[download] Destination:" in line:
+                    dest = line.split("Destination:")[1].strip()
+                    filename = os.path.basename(dest)
+                    self.filename_detected.emit(filename)
+                elif "has already been downloaded" in line:
+                    parts = line.split("[download]")
+                    if len(parts) > 1:
+                        dest = parts[1].split("has already been downloaded")[0].strip()
+                        filename = os.path.basename(dest)
+                        self.filename_detected.emit(filename)
+                        
                 # Match progress pattern
                 if "[download]" in line:
                     percent_m = re.search(r'(\d+(?:\.\d+)?)%', line)
@@ -268,9 +282,17 @@ class YTDownloadWorker(QThread):
         self._is_cancelled = True
         if self.process:
             try:
-                self.process.terminate()
+                if sys.platform == "win32":
+                    startupinfo = subprocess.STARTUPINFO()
+                    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                    subprocess.run(["taskkill", "/F", "/T", "/PID", str(self.process.pid)], startupinfo=startupinfo, capture_output=True)
+                else:
+                    self.process.terminate()
             except Exception:
-                pass
+                try:
+                    self.process.kill()
+                except Exception:
+                    pass
 
 # YTDownloadErrorDialog was replaced by the shared DetailedErrorDialog class
 
@@ -287,6 +309,8 @@ class YTDownloadProgressPanel(QWidget):
         self.success_output = ""
         self.worker = YTDownloadWorker(self.cmd)
         self.worker.progress.connect(self.on_progress)
+        self.worker.filename_detected.connect(self.on_filename_detected)
+        self.worker.log_line.connect(self.on_log_line)
         self.worker.finished.connect(self.on_finished)
         
         self.init_ui()
@@ -300,8 +324,13 @@ class YTDownloadProgressPanel(QWidget):
         self.title_label.setStyleSheet("font-size: 14px; font-weight: bold;")
         layout.addWidget(self.title_label)
         
+        self.lbl_filename = QLabel("File: Initializing...", self)
+        self.lbl_filename.setStyleSheet("color: %s; font-size: 12px; font-weight: bold;" % _tc()["text"])
+        self.lbl_filename.setWordWrap(True)
+        layout.addWidget(self.lbl_filename)
+        
         self.progress_bar = QProgressBar(self)
-        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setRange(0, 0)
         self.progress_bar.setValue(0)
         layout.addWidget(self.progress_bar)
         
@@ -330,6 +359,44 @@ class YTDownloadProgressPanel(QWidget):
             details_layout.addWidget(lbl)
             
         layout.addWidget(self.details_frame)
+        
+        from PySide6.QtWidgets import QPlainTextEdit, QListWidget
+        row_layout = QHBoxLayout()
+        
+        self.console_output = QPlainTextEdit(self)
+        self.console_output.setReadOnly(True)
+        self.console_output.setMinimumHeight(140)
+        self.console_output.setStyleSheet("""
+            QPlainTextEdit {
+                background-color: #0c0c0c;
+                color: #ffffff;
+                font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+                font-size: 11px;
+                border: 1px solid #333333;
+                border-radius: 4px;
+                padding: 4px;
+            }
+        """)
+        row_layout.addWidget(self.console_output, 3)
+        
+        self.queue_list = QListWidget(self)
+        self.queue_list.setMinimumHeight(140)
+        self.queue_list.setStyleSheet(f"""
+            QListWidget {{
+                background-color: #0c0c0c;
+                color: #888888;
+                font-size: 11px;
+                border: 1px solid #333333;
+                border-radius: 4px;
+                padding: 4px;
+            }}
+        """)
+        row_layout.addWidget(self.queue_list, 2)
+        
+        layout.addLayout(row_layout)
+        
+        # Populate initial queue
+        self.update_queue_display()
         
         # Cancel Button
         btn_layout = QHBoxLayout()
@@ -364,11 +431,29 @@ class YTDownloadProgressPanel(QWidget):
             self.lbl_elapsed.setText(f"Time Elapsed: {m:02d}:{s:02d}")
             
     def on_progress(self, percent, speed, eta, downloaded, total):
+        if self.progress_bar.maximum() == 0:
+            self.progress_bar.setRange(0, 100)
         self.title_label.setText(f"Downloading Video ({percent:.1f}%)")
         self.progress_bar.setValue(int(percent))
         self.lbl_speed.setText(f"Speed: {speed}")
         self.lbl_eta.setText(f"Time Left: {eta}")
         self.lbl_size.setText(f"Size: {total}")
+        
+    def on_filename_detected(self, filename):
+        self.lbl_filename.setText(f"File: {filename}")
+        
+    def on_log_line(self, text):
+        self.console_output.appendPlainText(text)
+        self.console_output.ensureCursorVisible()
+        
+    def update_queue_display(self):
+        self.queue_list.clear()
+        if hasattr(self.parentWidget(), "download_queue"):
+            queue = self.parentWidget().download_queue
+            for idx, url in enumerate(queue):
+                # Only show filename/basename or clean url
+                clean_url = url.split("?")[0]
+                self.queue_list.addItem(f"{idx+1}. {clean_url}")
         
     def on_finished(self, success, error_message):
         self.elapsed_timer.stop()
@@ -421,15 +506,30 @@ class YTDownloadProgressPanel(QWidget):
             self.rejected.emit(error_message)
             
     def on_cancel_clicked(self):
+        try:
+            self.worker.progress.disconnect(self.on_progress)
+        except Exception:
+            pass
+        try:
+            self.worker.filename_detected.disconnect(self.on_filename_detected)
+        except Exception:
+            pass
+        try:
+            self.worker.log_line.disconnect(self.on_log_line)
+        except Exception:
+            pass
+        try:
+            self.worker.finished.disconnect(self.on_finished)
+        except Exception:
+            pass
         self.worker.cancel()
-        self.title_label.setText("Cancelling download...")
-        self.btn_cancel.setEnabled(False)
         self.rejected.emit("Cancelled")
 
 class YTDLPTab(QWidget):
     def __init__(self, main_window):
         super().__init__(main_window)
         self.main_window = main_window
+        self.download_queue = []
         
         self.stacked_widget = QStackedWidget(self)
         
@@ -457,54 +557,35 @@ class YTDLPTab(QWidget):
         widget = QWidget(self)
         layout = QVBoxLayout(widget)
         
-        # Recent Downloads Table
-        from PySide6.QtWidgets import QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QMenu
-        self.recent_downloads_table = QTableWidget(widget)
-        self.recent_downloads_table.setColumnCount(3)
-        self.recent_downloads_table.setHorizontalHeaderLabels(["Name", "Type", "Path"])
-        self.recent_downloads_table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.recent_downloads_table.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.recent_downloads_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.recent_downloads_table.setAlternatingRowColors(True)
-        self.recent_downloads_table.setMinimumHeight(150)
-        self.recent_downloads_table.setMaximumHeight(250)
+        # Recent Downloads Grid
+        self.table_row_container = QWidget(widget)
+        table_row = QVBoxLayout(self.table_row_container)
+        table_row.setContentsMargins(0, 0, 0, 0)
         
+        from PySide6.QtWidgets import QScrollArea, QMenu
+        from src.utils import FlowLayout
         tc = _tc()
-        self.recent_downloads_table.setStyleSheet(f"""
-            QTableWidget {{
-                background-color: {tc["input_bg"]};
-                gridline-color: {tc["border_subtle"]};
-                color: {tc["text"]};
-                border: 1px solid {tc["border"]};
-                border-radius: 6px;
-            }}
-            QHeaderView::section {{
-                background-color: {tc["secondary_btn_bg"]};
-                color: {tc["text_bright"]};
-                border: 1px solid {tc["border_subtle"]};
-                padding: 4px;
-                font-weight: bold;
-            }}
-        """)
-        self.recent_downloads_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.recent_downloads_table.itemDoubleClicked.connect(self.on_recent_download_double_clicked)
         
-        # Set up Context Menu for Table
-        self.recent_downloads_table.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.recent_downloads_table.customContextMenuRequested.connect(self.show_hide_downloads_menu)
+        self.recent_downloads_scroll = QScrollArea(self.table_row_container)
+        self.recent_downloads_scroll.setWidgetResizable(True)
+        self.recent_downloads_scroll.setFrameShape(QScrollArea.NoFrame)
+        self.recent_downloads_scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        self.recent_downloads_scroll.setMinimumHeight(150)
+        self.recent_downloads_scroll.setMaximumHeight(350)
+        
+        self.recent_downloads_grid_container = QWidget()
+        self.recent_downloads_grid_container.setStyleSheet("background: transparent;")
+        self.recent_downloads_grid_layout = FlowLayout(self.recent_downloads_grid_container, margin=0, spacing=16)
+        self.recent_downloads_scroll.setWidget(self.recent_downloads_grid_container)
+        
+        table_row.addWidget(self.recent_downloads_scroll)
+        layout.addWidget(self.table_row_container)
         
         # Set up Context Menu for Empty layout area
         widget.setContextMenuPolicy(Qt.CustomContextMenu)
         widget.customContextMenuRequested.connect(self.show_hide_downloads_menu)
-        
-        # Center the table container
-        self.table_row_container = QWidget(widget)
-        table_row = QHBoxLayout(self.table_row_container)
-        table_row.setContentsMargins(0, 0, 0, 0)
-        table_row.addStretch(1)
-        table_row.addWidget(self.recent_downloads_table, 4)
-        table_row.addStretch(1)
-        layout.addWidget(self.table_row_container)
+        self.recent_downloads_scroll.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.recent_downloads_scroll.customContextMenuRequested.connect(self.show_hide_downloads_menu)
         
         layout.addSpacing(12)
         
@@ -1130,18 +1211,24 @@ class YTDLPTab(QWidget):
                 settings["ytdlp_downloaded_ids"] = downloaded
                 self.main_window.save_app_settings()
 
-    def download_audio(self):
+    def download_audio(self, force=False):
         if not self.ensure_ytdlp_available():
             return
             
         url = self.url_input.text().strip()
-        if not self.check_duplicate_and_confirm(url):
-            return
+        if not force:
+            if self.is_downloading():
+                self.add_to_queue(url)
+                return
+            if not self.check_duplicate_and_confirm(url):
+                return
             
         settings = self.main_window.settings
         
         download_dir = settings.get("ytdlp_download_dir", os.path.join(os.path.expanduser("~"), "Downloads"))
         audio_format = settings.get("ytdlp_audio_format", "mp3")
+        if "music.youtube.com" in url:
+            audio_format = "mp3"
         audio_quality = settings.get("ytdlp_audio_quality", "best")
         embed_metadata = settings.get("ytdlp_embed_metadata", True)
         embed_thumbnail = settings.get("ytdlp_embed_thumbnail", True)
@@ -1180,13 +1267,17 @@ class YTDLPTab(QWidget):
         
         self.run_download_cmd(cmd)
         
-    def download_video(self):
+    def download_video(self, force=False):
         if not self.ensure_ytdlp_available():
             return
             
         url = self.url_input.text().strip()
-        if not self.check_duplicate_and_confirm(url):
-            return
+        if not force:
+            if self.is_downloading():
+                self.add_to_queue(url)
+                return
+            if not self.check_duplicate_and_confirm(url):
+                return
             
         settings = self.main_window.settings
         
@@ -1253,7 +1344,12 @@ class YTDLPTab(QWidget):
             file_path = self.parse_downloaded_filepath(success_output)
             if file_path:
                 self.record_download_history(file_path)
-            self.show_success_panel(success_output)
+            
+            if hasattr(self, "download_queue") and self.download_queue:
+                from PySide6.QtCore import QTimer
+                QTimer.singleShot(1000, self.check_and_process_queue)
+            else:
+                self.show_success_panel(success_output)
             
         def on_rejected(error_message):
             if getattr(panel, "ffmpeg_missing_fallback", False):
@@ -1264,7 +1360,14 @@ class YTDLPTab(QWidget):
                 new_cmd = cmd[:-1] + ["--cookies-from-browser", panel.selected_browser, cmd[-1]]
                 self.run_download_cmd(new_cmd)
             else:
-                self.go_to_input()
+                if error_message == "Cancelled":
+                    self.download_queue.clear()
+                    self.go_to_input()
+                elif hasattr(self, "download_queue") and self.download_queue:
+                    from PySide6.QtCore import QTimer
+                    QTimer.singleShot(1000, self.check_and_process_queue)
+                else:
+                    self.go_to_input()
                 
         panel.accepted.connect(on_accepted)
         panel.rejected.connect(on_rejected)
@@ -1478,37 +1581,67 @@ class YTDLPTab(QWidget):
         layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(16)
         
-        layout.addStretch(1)
+        def finish_action():
+            self.go_to_input()
+
+        nav_row = QHBoxLayout()
+        btn_back = QPushButton("← Back", panel)
+        btn_back.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                border: none;
+                color: %s;
+                font-size: 14px;
+                font-weight: bold;
+                padding: 6px;
+                text-align: left;
+            }
+            QPushButton:hover {
+                color: %s;
+            }
+        """ % (_tc()["text_muted"], _tc()["text_bright"]))
+        btn_back.clicked.connect(finish_action)
+        nav_row.addWidget(btn_back)
+        nav_row.addStretch()
+        layout.addLayout(nav_row)
+        
+        is_wide = (self.main_window.width() >= 750)
+        
+        left_widget = QWidget(panel)
+        left_layout = QVBoxLayout(left_widget)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(16)
+        
+        right_widget = QWidget(panel)
+        right_layout = QVBoxLayout(right_widget)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(16)
         
         label = QLabel("Download completed successfully!", panel)
         label.setStyleSheet("font-size: 18px; font-weight: bold; color: #ffffff;")
         label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(label)
+        left_layout.addWidget(label)
         
         file_path = self.parse_downloaded_filepath(output)
         if file_path and os.path.exists(file_path) and os.path.isfile(file_path):
-            from src.widgets import DraggableFileCard
+            from src.widgets import ImageCard
             card_layout = QHBoxLayout()
             card_layout.addStretch()
-            self.file_card = DraggableFileCard(file_path, panel)
+            self.file_card = ImageCard(file_path, panel)
             card_layout.addWidget(self.file_card)
             card_layout.addStretch()
-            layout.addLayout(card_layout)
+            left_layout.addLayout(card_layout)
         elif file_path:
             file_label = QLabel(os.path.basename(file_path), panel)
             file_label.setStyleSheet("color: %s; font-size: 13px;" % _tc()["text"])
             file_label.setWordWrap(True)
             file_label.setAlignment(Qt.AlignCenter)
-            layout.addWidget(file_label)
+            left_layout.addWidget(file_label)
         else:
             settings = self.main_window.settings
             file_path = settings.get("ytdlp_download_dir", os.path.join(os.path.expanduser("~"), "Downloads"))
             
         btn_layout = QHBoxLayout()
-        
-        def finish_action():
-            self.go_to_input()
-
         if file_path and os.path.exists(file_path) and os.path.isfile(file_path):
             btn_open = QPushButton("Open File", panel)
             btn_open.setStyleSheet("""
@@ -1542,28 +1675,44 @@ class YTDLPTab(QWidget):
         """ % (_tc()["secondary_btn_bg"], _tc()["secondary_btn_border"], _tc()["text"], _tc()["secondary_btn_hover"]))
         btn_folder.clicked.connect(lambda: [self.show_in_explorer(file_path), finish_action()])
         btn_layout.addWidget(btn_folder)
+        left_layout.addLayout(btn_layout)
+        left_layout.addStretch(1)
         
-        btn_close = QPushButton("Close", panel)
-        btn_close.setStyleSheet("""
-            QPushButton {
-                background-color: %s;
-                border: 1px solid %s;
-                padding: 8px 16px;
-                border-radius: 4px;
-                color: %s;
-            }
-            QPushButton:hover {
-                background-color: %s;
-            }
-        """ % (_tc()["secondary_btn_bg"], _tc()["secondary_btn_border"], _tc()["text"], _tc()["secondary_btn_hover"]))
-        btn_close.clicked.connect(finish_action)
-        btn_layout.addWidget(btn_close)
+        recent_label = QLabel("Recent Downloads", panel)
+        recent_label.setStyleSheet("font-size: 16px; font-weight: bold; color: %s;" % _tc()["text_bright"])
+        right_layout.addWidget(recent_label)
         
-        layout.addLayout(btn_layout)
-        layout.addStretch(1)
+        from PySide6.QtWidgets import QScrollArea, QGridLayout
+        success_grid_scroll = QScrollArea(panel)
+        success_grid_scroll.setWidgetResizable(True)
+        success_grid_scroll.setStyleSheet("border: none; background-color: transparent;")
+        
+        success_grid_container = QWidget()
+        success_grid_container.setStyleSheet("background-color: transparent;")
+        success_grid_layout = QGridLayout(success_grid_container)
+        success_grid_layout.setSpacing(16)
+        success_grid_layout.setAlignment(Qt.AlignTop)
+        
+        success_grid_scroll.setWidget(success_grid_container)
+        right_layout.addWidget(success_grid_scroll, 1)
+        
+        if is_wide:
+            left_widget.setMaximumWidth(320)
+            content_layout = QHBoxLayout()
+            content_layout.addWidget(left_widget, 0)
+            content_layout.addWidget(right_widget, 1)
+            scroll_width = (self.main_window.width() - 320) or 300
+        else:
+            content_layout = QVBoxLayout()
+            content_layout.addWidget(left_widget)
+            content_layout.addWidget(right_widget, 1)
+            scroll_width = self.main_window.width() or 600
+            
+        layout.addLayout(content_layout)
         
         self.stacked_widget.addWidget(panel)
         self.stacked_widget.setCurrentWidget(panel)
+        self.populate_downloads_grid_into(success_grid_layout, success_grid_container, scroll_width)
         
     def on_format_error_fallback(self, failed_cmd):
         url = failed_cmd[-1]
@@ -1648,23 +1797,9 @@ class YTDLPTab(QWidget):
         self.refresh_recent_downloads_table()
 
     def refresh_recent_downloads_table(self):
-        self.recent_downloads_table.setRowCount(0)
-        settings = self.main_window.settings
-        downloads = settings.get("ytdlp_recent_downloads", [])
-        self.recent_downloads_table.setRowCount(len(downloads))
-        
-        from PySide6.QtWidgets import QTableWidgetItem
-        for i, (name, ftype, path) in enumerate(downloads):
-            name_item = QTableWidgetItem(name)
-            name_item.setToolTip(path)
-            type_item = QTableWidgetItem(ftype)
-            type_item.setToolTip(path)
-            path_item = QTableWidgetItem(path)
-            path_item.setToolTip(path)
-            
-            self.recent_downloads_table.setItem(i, 0, name_item)
-            self.recent_downloads_table.setItem(i, 1, type_item)
-            self.recent_downloads_table.setItem(i, 2, path_item)
+        scroll_width = self.recent_downloads_scroll.viewport().width()
+        if scroll_width <= 0: scroll_width = 800
+        self.populate_downloads_grid_into(self.recent_downloads_grid_layout, self.recent_downloads_grid_container, scroll_width)
 
     def update_recent_downloads_visibility(self):
         downloads = self.main_window.settings.get("ytdlp_recent_downloads", [])
@@ -1690,20 +1825,22 @@ class YTDLPTab(QWidget):
             }
         """ % (_tc()["dialog_bg"], _tc()["border"], _tc()["text"], _tc()["accent"]))
         
-        act_hide = menu.addAction("Hide recent downloads")
+        visible = self.main_window.settings.get("ytdlp_show_recent_downloads", True)
+        if visible:
+            act_toggle = menu.addAction("Hide recent downloads")
+        else:
+            act_toggle = menu.addAction("Show recent items")
+            
         action = menu.exec(sender.mapToGlobal(pos))
-        if action == act_hide:
-            self.main_window.settings["ytdlp_show_recent_downloads"] = False
+        if action == act_toggle:
+            self.main_window.settings["ytdlp_show_recent_downloads"] = not visible
             self.main_window.save_app_settings()
             self.update_recent_downloads_visibility()
+            if not visible:
+                self.refresh_recent_downloads_table()
 
     def on_recent_download_double_clicked(self, item):
-        row = item.row()
-        settings = self.main_window.settings
-        downloads = settings.get("ytdlp_recent_downloads", [])
-        if 0 <= row < len(downloads):
-            path = downloads[row][2]
-            self.show_in_explorer(path)
+        pass
 
     def init_downloads_grid_screen(self):
         widget = QWidget(self)
@@ -1759,36 +1896,36 @@ class YTDLPTab(QWidget):
         self.refresh_downloads_grid()
         self.stacked_widget.setCurrentIndex(2)
 
-    def refresh_downloads_grid(self):
+    def populate_downloads_grid_into(self, layout, container, scroll_width):
         # Clear layout
-        while self.grid_layout.count():
-            item = self.grid_layout.takeAt(0)
+        while layout.count():
+            item = layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
                 
         settings = self.main_window.settings
         downloads = settings.get("ytdlp_recent_downloads", [])
         
-        # We need DraggableFileCard
-        from src.widgets import DraggableFileCard
+        # We need ImageCard
+        from src.widgets import ImageCard
         from PySide6.QtWidgets import QMenu
         
-        scroll_width = self.grid_scroll.viewport().width() or self.width() or 600
-        cols = max(1, (scroll_width - 16) // 156)
-        
-        # Clear old column stretches
-        for c in range(self.grid_layout.columnCount()):
-            self.grid_layout.setColumnStretch(c, 0)
-            
-        # Re-set stretches for current active columns
-        for c in range(cols):
-            self.grid_layout.setColumnStretch(c, 1)
+        is_grid = hasattr(layout, "columnCount")
+        if is_grid:
+            cols = max(1, (scroll_width - 16) // 156)
+            # Clear old column stretches
+            for c in range(layout.columnCount()):
+                layout.setColumnStretch(c, 0)
+                
+            # Re-set stretches for current active columns
+            for c in range(cols):
+                layout.setColumnStretch(c, 1)
         
         valid_downloads = [d for d in downloads if os.path.exists(d[2])]
         total_items = len(valid_downloads)
         
         for idx, (name, ftype, path) in enumerate(valid_downloads):
-            card = DraggableFileCard(path, self.grid_container)
+            card = ImageCard(path, container)
             card.setContextMenuPolicy(Qt.CustomContextMenu)
             card.customContextMenuRequested.connect(lambda pos, p=path, c=card: self.show_card_context_menu(pos, p, c))
             
@@ -1797,9 +1934,16 @@ class YTDLPTab(QWidget):
             else:
                 card.setMaximumWidth(16777215)
                 
-            row = idx // cols
-            col = idx % cols
-            self.grid_layout.addWidget(card, row, col)
+            if is_grid:
+                row = idx // cols
+                col = idx % cols
+                layout.addWidget(card, row, col)
+            else:
+                layout.addWidget(card)
+
+    def refresh_downloads_grid(self):
+        scroll_width = self.grid_scroll.viewport().width() or self.width() or 600
+        self.populate_downloads_grid_into(self.grid_layout, self.grid_container, scroll_width)
 
     def show_card_context_menu(self, pos, file_path, card):
         menu = QMenu(self)
@@ -1977,5 +2121,52 @@ class YTDLPTab(QWidget):
         super().resizeEvent(event)
         if hasattr(self, 'stacked_widget') and self.stacked_widget.currentIndex() == 2:
             self.realign_downloads_grid()
+
+    def add_to_queue(self, url, download_type=None):
+        if not url:
+            return
+        if download_type:
+            self._queue_download_type = download_type
+        import re
+        urls = re.findall(r'(https?://\S+)', url)
+        if not urls:
+            urls = [url.strip()]
+            
+        if not hasattr(self, "download_queue"):
+            self.download_queue = []
+            
+        for u in urls:
+            if u not in self.download_queue:
+                self.download_queue.append(u)
+                
+        # Update progress panel queue display if active
+        curr = self.stacked_widget.currentWidget()
+        if isinstance(curr, YTDownloadProgressPanel):
+            curr.update_queue_display()
+            
+        self.check_and_process_queue()
+
+    def is_downloading(self):
+        curr = self.stacked_widget.currentWidget()
+        if isinstance(curr, YTDownloadProgressPanel):
+            return curr.worker.isRunning()
+        return False
+
+    def check_and_process_queue(self):
+        if not hasattr(self, "download_queue") or not self.download_queue:
+            return
+        if self.is_downloading():
+            return
+            
+        url = self.download_queue.pop(0)
+        self.start_queued_download(url)
+
+    def start_queued_download(self, url):
+        self.url_input.setText(url)
+        is_explicit_audio = getattr(self, "_queue_download_type", "video") == "audio"
+        if is_explicit_audio or "music.youtube.com" in url:
+            self.download_audio(force=True)
+        else:
+            self.download_video(force=True)
 
 

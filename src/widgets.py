@@ -46,10 +46,40 @@ class LeftAlignTabProxy(QProxyStyle):
 class DragTabBar(QTabBar):
     def __init__(self, parent=None):
         super().__init__(parent)
-        from PySide6.QtCore import Qt
+        from PySide6.QtCore import Qt, QTimer
         self.setCursor(Qt.PointingHandCursor)
         self.setMouseTracking(True)
         self.setStyle(LeftAlignTabProxy(self.style()))
+        
+        self._pulse_val = 1.0
+        self._pulse_direction = -1
+        self._pulse_timer = QTimer(self)
+        self._pulse_timer.timeout.connect(self._update_pulse)
+        self._pulse_timer.setInterval(50)
+        self._pulsing_tabs = set()
+
+    def set_pulse_active(self, index, active):
+        if active:
+            self._pulsing_tabs.add(index)
+            if not self._pulse_timer.isActive():
+                self._pulse_timer.start()
+        else:
+            if index in self._pulsing_tabs:
+                self._pulsing_tabs.remove(index)
+            if not self._pulsing_tabs and self._pulse_timer.isActive():
+                self._pulse_timer.stop()
+                self._pulse_val = 1.0
+                self.update()
+
+    def _update_pulse(self):
+        self._pulse_val += 0.03 * self._pulse_direction
+        if self._pulse_val <= 0.6:
+            self._pulse_val = 0.6
+            self._pulse_direction = 1
+        elif self._pulse_val >= 1.0:
+            self._pulse_val = 1.0
+            self._pulse_direction = -1
+        self.update()
 
     def tabSizeHint(self, index):
         return QSize(160, 42)
@@ -61,11 +91,21 @@ class DragTabBar(QTabBar):
             self.initStyleOption(option, i)
             # Draw shape normally (RoundedWest)
             painter.drawControl(QStyle.CE_TabBarTabShape, option)
+            
+            painter.save()
+            if i in self._pulsing_tabs:
+                font = painter.font()
+                font.setItalic(True)
+                painter.setFont(font)
+                painter.setOpacity(self._pulse_val)
+                
             # Force shape to RoundedNorth for text drawing to keep it horizontal
             option.shape = QTabBar.RoundedNorth
             painter.drawControl(QStyle.CE_TabBarTabLabel, option)
+            painter.restore()
 
     def mouseMoveEvent(self, event):
+        from PySide6.QtCore import Qt
         super().mouseMoveEvent(event)
         if event.buttons() & Qt.LeftButton:
             index = self.tabAt(event.position().toPoint())
@@ -162,6 +202,9 @@ class ToastNotification(QWidget):
     _SLIDE_OUT_MS = 280
     # Vertical gap from window bottom-right corner
     _MARGIN = 18
+    
+    active_toasts = []
+    is_hovered = False
 
     def __init__(self, parent: QWidget, message: str,
                  severity: str = 'info', duration_ms: int = 3500):
@@ -293,6 +336,8 @@ class ToastNotification(QWidget):
     # ── Public API ────────────────────────────────────────────────────────────
     def show_toast(self):
         """Position in parent's bottom-right corner and animate in."""
+        if self not in ToastNotification.active_toasts:
+            ToastNotification.active_toasts.append(self)
         self._reposition()
         self.show()
         self.raise_()
@@ -306,10 +351,21 @@ class ToastNotification(QWidget):
         p = self.parent()
         if p is None:
             return
+        
+        if self not in ToastNotification.active_toasts:
+            ToastNotification.active_toasts.append(self)
+        idx = ToastNotification.active_toasts.index(self)
+        
         pw, ph = p.width(), p.height()
         tw, th = self.width(), self.height()
+        
         target_x = pw - tw - self._MARGIN
-        target_y = ph - th - self._MARGIN
+        
+        if ToastNotification.is_hovered or len(ToastNotification.active_toasts) <= 1:
+            target_y = ph - (th + 10) * (idx + 1) - self._MARGIN
+        else:
+            target_y = ph - th - self._MARGIN - 16 * idx
+            
         start_y   = ph + 20           # just below visible area
         self.move(target_x, start_y)
         self._pos_anim.setStartValue(self.pos())
@@ -325,7 +381,12 @@ class ToastNotification(QWidget):
         self._auto_timer.stop()
         self._countdown.stop()
         
-        # Setup slide-out animation destination: slide down off screen
+        if self in ToastNotification.active_toasts:
+            ToastNotification.active_toasts.remove(self)
+            
+        for t in ToastNotification.active_toasts:
+            t.animate_to_new_stack_position()
+            
         p = self.parent()
         if p:
             from PySide6.QtCore import QPoint as _QPoint
@@ -334,6 +395,54 @@ class ToastNotification(QWidget):
             self._slide_out.start()
         else:
             self.close()
+
+    def animate_to_new_stack_position(self):
+        p = self.parent()
+        if p is None:
+            return
+        if self not in ToastNotification.active_toasts:
+            return
+        idx = ToastNotification.active_toasts.index(self)
+        pw, ph = p.width(), p.height()
+        tw, th = self.width(), self.height()
+        
+        target_x = pw - tw - self._MARGIN
+        if ToastNotification.is_hovered or len(ToastNotification.active_toasts) <= 1:
+            target_y = ph - (th + 10) * (idx + 1) - self._MARGIN
+        else:
+            target_y = ph - th - self._MARGIN - 16 * idx
+            
+        from PySide6.QtCore import QPoint as _QPoint
+        self._pos_anim.stop()
+        self._pos_anim.setStartValue(self.pos())
+        self._pos_anim.setEndValue(_QPoint(target_x, target_y))
+        self._pos_anim.start()
+
+    def enterEvent(self, event):
+        super().enterEvent(event)
+        if len(ToastNotification.active_toasts) > 1:
+            ToastNotification.is_hovered = True
+            for t in ToastNotification.active_toasts:
+                t.animate_to_new_stack_position()
+                
+    def leaveEvent(self, event):
+        super().leaveEvent(event)
+        if len(ToastNotification.active_toasts) > 1:
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(100, self.check_leave_hover)
+            
+    def check_leave_hover(self):
+        hovered = False
+        from PySide6.QtGui import QCursor
+        cursor_pos = QCursor.pos()
+        for t in ToastNotification.active_toasts:
+            if t.geometry().contains(t.parent().mapFromGlobal(cursor_pos)):
+                hovered = True
+                break
+        if not hovered:
+            ToastNotification.is_hovered = False
+            for t in ToastNotification.active_toasts:
+                t.animate_to_new_stack_position()
 
     # ── Keep toast in corner if window is resized ─────────────────────────────
     def _on_parent_resized(self):
@@ -682,6 +791,21 @@ class ImageCard(QFrame):
         self.setFixedHeight(210)
         self.drag_start_position = QPoint()
         
+        from PySide6.QtWidgets import QGraphicsDropShadowEffect
+        from PySide6.QtGui import QColor
+        from PySide6.QtCore import QVariantAnimation
+        
+        self.shadow = QGraphicsDropShadowEffect(self)
+        self.shadow.setBlurRadius(8)
+        self.shadow.setXOffset(0)
+        self.shadow.setYOffset(2)
+        self.shadow.setColor(QColor(0, 0, 0, 80))
+        self.setGraphicsEffect(self.shadow)
+        
+        self.hover_anim = QVariantAnimation(self)
+        self.hover_anim.setDuration(200)
+        self.hover_anim.valueChanged.connect(self.update_hover_animation)
+        
         # Enable Custom Context Menu
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self.show_context_menu)
@@ -697,6 +821,7 @@ class ImageCard(QFrame):
         self.img_label.setStyleSheet("background-color: transparent; border-radius: 6px;")
         
         pixmap = QPixmap(file_path)
+        resolution_str = ""
         if pixmap.isNull():
             # Try to extract thumbnail for videos via OpenCV
             try:
@@ -707,6 +832,8 @@ class ImageCard(QFrame):
                 if cap.isOpened():
                     ret, frame = cap.read()
                     if ret:
+                        h, w, _ = frame.shape
+                        resolution_str = f"{w}x{h}"
                         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                         pil_img = Image.fromarray(frame_rgb)
                         q_img = pil_to_qimage(pil_img)
@@ -714,6 +841,14 @@ class ImageCard(QFrame):
                     cap.release()
             except Exception:
                 pass
+        else:
+            from PySide6.QtGui import QImageReader
+            orig = QImageReader(file_path)
+            size = orig.size()
+            if size.isValid():
+                resolution_str = f"{size.width()}x{size.height()}"
+            else:
+                resolution_str = f"{pixmap.width()}x{pixmap.height()}"
 
         if not pixmap.isNull():
             scaled_pixmap = pixmap.scaled(140, 110, Qt.KeepAspectRatio, Qt.SmoothTransformation)
@@ -742,24 +877,21 @@ class ImageCard(QFrame):
         except OSError:
             size_str = "Unknown Size"
             
+        if resolution_str:
+            size_str = f"{resolution_str} • {size_str}"
+            
         self.size_label = QLabel(size_str, self)
         self.size_label.setAlignment(Qt.AlignCenter)
         self.size_label.setObjectName("CardSize")
+        self.size_label.setContentsMargins(0, 6, 0, 0)
         layout.addWidget(self.size_label)
+        
+        layout.addStretch()
         
         self.checkbox = QCheckBox(self)
         self.checkbox.setObjectName("cardCheckbox")
         self.checkbox.move(8, 8)
         self.checkbox.stateChanged.connect(self.on_checkbox_changed)
-
-        # Info badge — created lazily on first hover, dimensions cached then
-        self._info_badge: CardInfoBadge | None = None
-        self._img_dims: tuple[int, int] | None = None   # (w, h) in pixels
-        self._size_kb: float = 0.0
-        try:
-            self._size_kb = os.path.getsize(file_path) / 1024
-        except OSError:
-            pass
 
         # Spinner overlay — created on demand by set_processing()
         self._spinner: CardSpinner | None = None
@@ -839,62 +971,27 @@ class ImageCard(QFrame):
             return main_win.has_active_selections_vid()
         return False
         
+    def update_hover_animation(self, value):
+        self.shadow.setBlurRadius(value)
+        self.shadow.setYOffset(value / 4)
+        
     def enterEvent(self, event):
         main_win = self.window()
         if hasattr(main_win, 'set_status'):
             main_win.set_status(f"Location: {self.file_path}")
-
-        self._show_info_badge()
         super().enterEvent(event)
+        self.hover_anim.setStartValue(self.shadow.blurRadius())
+        self.hover_anim.setEndValue(20)
+        self.hover_anim.start()
 
     def leaveEvent(self, event):
         main_win = self.window()
         if hasattr(main_win, 'set_status'):
             main_win.set_status("Ready. Select checkbox to batch process, or click card directly.")
-
-        if self._info_badge:
-            self._info_badge.fade_out()
         super().leaveEvent(event)
-
-    # ── Info badge helpers ────────────────────────────────────────────────────
-    def _read_dims(self) -> tuple[int, int]:
-        """Read pixel dimensions once; prefer the already-loaded pixmap."""
-        if self._img_dims is not None:
-            return self._img_dims
-        pix = self.img_label.pixmap()
-        if pix and not pix.isNull():
-            # Reload the original (not the scaled thumbnail) for true dimensions
-            orig = QPixmap(self.file_path)
-            if not orig.isNull():
-                self._img_dims = (orig.width(), orig.height())
-                return self._img_dims
-        self._img_dims = (0, 0)
-        return self._img_dims
-
-    def _show_info_badge(self):
-        """Create (if needed) and fade-in the info badge over the thumbnail."""
-        # Skip if there's an active processing spinner
-        if self._spinner and self._spinner.isVisible():
-            return
-
-        w_px, h_px = self._read_dims()
-        if w_px == 0 and h_px == 0:
-            return   # can't load image — don't show badge
-
-        if self._info_badge is None:
-            badge_h = 42
-            badge_w = self.img_label.width()
-            self._info_badge = CardInfoBadge(
-                self.img_label, w_px, h_px, self._size_kb
-            )
-            self._info_badge.setGeometry(
-                0,
-                self.img_label.height() - badge_h,
-                badge_w,
-                badge_h
-            )
-
-        self._info_badge.fade_in()
+        self.hover_anim.setStartValue(self.shadow.blurRadius())
+        self.hover_anim.setEndValue(8)
+        self.hover_anim.start()
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -931,12 +1028,14 @@ class ImageCard(QFrame):
         drag.exec(Qt.CopyAction)
         
     def show_context_menu(self, position):
+        from src.dialogs import _tc
         menu = QMenu(self)
+        tc = _tc()
         menu.setStyleSheet("""
             QMenu {
-                background-color: #1a1a20;
-                color: #e2e8f0;
-                border: 1px solid #374151;
+                background-color: %s;
+                color: %s;
+                border: 1px solid %s;
                 border-radius: 6px;
                 padding: 4px;
             }
@@ -945,15 +1044,15 @@ class ImageCard(QFrame):
                 border-radius: 4px;
             }
             QMenu::item:selected {
-                background-color: #6366f1;
+                background-color: %s;
                 color: #ffffff;
             }
             QMenu::separator {
                 height: 1px;
-                background-color: #2d2d39;
+                background-color: %s;
                 margin: 4px 0px;
             }
-        """)
+        """ % (tc["menu_bg"], tc["text"], tc["border"], tc["accent"], tc["border"]))
         
         act_rename = menu.addAction("Rename")
         act_copy = menu.addAction("Copy")
@@ -1126,12 +1225,14 @@ class RegionSelectLabel(QLabel):
         drag.exec(Qt.CopyAction)
         
     def show_context_menu(self, position):
+        from src.dialogs import _tc
         menu = QMenu(self)
+        tc = _tc()
         menu.setStyleSheet("""
             QMenu {
-                background-color: #1a1a20;
-                color: #e2e8f0;
-                border: 1px solid #374151;
+                background-color: %s;
+                color: %s;
+                border: 1px solid %s;
                 border-radius: 6px;
                 padding: 4px;
             }
@@ -1140,15 +1241,15 @@ class RegionSelectLabel(QLabel):
                 border-radius: 4px;
             }
             QMenu::item:selected {
-                background-color: #6366f1;
+                background-color: %s;
                 color: #ffffff;
             }
             QMenu::separator {
                 height: 1px;
-                background-color: #2d2d39;
+                background-color: %s;
                 margin: 4px 0px;
             }
-        """)
+        """ % (tc["menu_bg"], tc["text"], tc["border"], tc["accent"], tc["border"]))
         
         act_rename = menu.addAction("Rename")
         act_copy = menu.addAction("Copy")
