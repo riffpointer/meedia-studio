@@ -554,24 +554,31 @@ class YTDLPTab(QWidget):
         self.auto_paste_from_clipboard()
         
     def init_input_screen(self):
+        tc = _tc()
         widget = QWidget(self)
         layout = QVBoxLayout(widget)
         
         # Recent Downloads Grid
         self.table_row_container = QWidget(widget)
+        self.table_row_container.setObjectName("RecentContainer")
+        self.table_row_container.setStyleSheet(f"""
+            QWidget#RecentContainer {{
+                background-color: {tc["card_bg"]};
+                border: 1px solid {tc["border"]};
+                border-radius: 8px;
+            }}
+        """)
         table_row = QVBoxLayout(self.table_row_container)
-        table_row.setContentsMargins(0, 0, 0, 0)
+        table_row.setContentsMargins(12, 12, 12, 12)
         
         from PySide6.QtWidgets import QScrollArea, QMenu
         from src.utils import FlowLayout
-        tc = _tc()
         
         self.recent_downloads_scroll = QScrollArea(self.table_row_container)
         self.recent_downloads_scroll.setWidgetResizable(True)
         self.recent_downloads_scroll.setFrameShape(QScrollArea.NoFrame)
         self.recent_downloads_scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
         self.recent_downloads_scroll.setMinimumHeight(150)
-        self.recent_downloads_scroll.setMaximumHeight(350)
         
         self.recent_downloads_grid_container = QWidget()
         self.recent_downloads_grid_container.setStyleSheet("background: transparent;")
@@ -579,7 +586,7 @@ class YTDLPTab(QWidget):
         self.recent_downloads_scroll.setWidget(self.recent_downloads_grid_container)
         
         table_row.addWidget(self.recent_downloads_scroll)
-        layout.addWidget(self.table_row_container)
+        layout.addWidget(self.table_row_container, 3)
         
         # Set up Context Menu for Empty layout area
         widget.setContextMenuPolicy(Qt.CustomContextMenu)

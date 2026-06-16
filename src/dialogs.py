@@ -1578,104 +1578,8 @@ class SettingsDialog(QDialog):
         
         self.tab_widget.addTab(self.ytdlp_tab, "YTDLP")
         
-        # Browser settings tab
-        self.browser_settings_tab = QWidget()
-        browser_layout = QVBoxLayout(self.browser_settings_tab)
-        browser_layout.setContentsMargins(12, 12, 12, 12)
-        browser_layout.setSpacing(10)
-        
-        browser_form = QWidget(self.browser_settings_tab)
-        browser_grid = QGridLayout(browser_form)
-        browser_grid.setContentsMargins(0, 0, 0, 0)
-        browser_grid.setSpacing(10)
-        
-        # Homepage
-        browser_grid.addWidget(QLabel("Homepage:", browser_form), 0, 0)
-        
-        self.browser_homepage_combo = QComboBox(browser_form)
-        self.browser_homepage_combo.addItems([
-            "Google Search",
-            "Google Image Search",
-            "DuckDuckGo Search",
-            "DuckDuckGo Image Search",
-            "Pinterest",
-            "PNGWing",
-            "Bing Images",
-            "Custom"
-        ])
-        
-        self.homepage_presets = {
-            "Google Search": "https://www.google.com",
-            "Google Image Search": "https://www.google.com/imghp",
-            "DuckDuckGo Search": "https://duckduckgo.com",
-            "DuckDuckGo Image Search": "https://duckduckgo.com/?iax=images&ia=images",
-            "Pinterest": "https://www.pinterest.com",
-            "PNGWing": "https://www.pngwing.com",
-            "Bing Images": "https://www.bing.com/images",
-        }
-        
-        saved_homepage = self.settings.get("browser_homepage", "https://www.google.com")
-        
-        # Match saved URL to preset key or default to Custom
-        matched_preset = "Custom"
-        for preset_name, preset_url in self.homepage_presets.items():
-            if saved_homepage == preset_url:
-                matched_preset = preset_name
-                break
-                
-        self.browser_homepage_combo.setCurrentText(matched_preset)
-        browser_grid.addWidget(self.browser_homepage_combo, 0, 1)
-        
-        # Custom Homepage LineEdit
-        self.custom_homepage_row = QWidget(browser_form)
-        custom_layout = QHBoxLayout(self.custom_homepage_row)
-        custom_layout.setContentsMargins(0, 0, 0, 0)
-        custom_layout.setSpacing(10)
-        custom_layout.addWidget(QLabel("Custom URL:", self.custom_homepage_row))
-        self.browser_homepage_edit = QLineEdit(self.custom_homepage_row)
-        self.browser_homepage_edit.setText(saved_homepage)
-        self.browser_homepage_edit.setStyleSheet("""
-            QLineEdit {{
-                background-color: {input_bg};
-                border: 1px solid {scrollbar_handle};
-                border-radius: 4px;
-                padding: 6px 12px;
-                color: {text};
-            }}
-        """.format(**_tc()))
-        custom_layout.addWidget(self.browser_homepage_edit, 1)
-        
-        browser_grid.addWidget(self.custom_homepage_row, 1, 0, 1, 2)
-        self.custom_homepage_row.setVisible(matched_preset == "Custom")
-        
-        # Connect combobox switch handler
-        self.browser_homepage_combo.currentTextChanged.connect(self.on_homepage_preset_changed)
-        
-        # Configure Pools Button
-        browser_grid.addWidget(QLabel("Media Pools:", browser_form), 2, 0)
-        self.btn_configure_pools = QPushButton("Configure Pool Paths...", browser_form)
-        self.btn_configure_pools.setStyleSheet("""
-            QPushButton {{
-                background-color: {secondary_btn_bg};
-                border: 1px solid {secondary_btn_border};
-                padding: 6px 12px;
-                border-radius: 4px;
-                color: {text};
-            }}
-            QPushButton:hover {{
-                background-color: {secondary_btn_hover};
-            }}
-        """.format(**_tc()))
-        browser_grid.addWidget(self.btn_configure_pools, 1, 1, Qt.AlignLeft)
-
-        browser_layout.addWidget(browser_form)
-        browser_layout.addStretch()
-        
-        self.tab_widget.addTab(self.browser_settings_tab, "Browser")
-        
         # Connect signals
         self.btn_tool_manager.clicked.connect(self.on_open_tool_manager)
-        self.btn_configure_pools.clicked.connect(self.on_configure_pools)
         
         layout.addWidget(self.tab_widget)
         layout.addStretch()
@@ -1703,9 +1607,9 @@ class SettingsDialog(QDialog):
                 border-bottom-right-radius: 6px;
             }}
             QTabBar::tab {{
-                background-color: {scrollbar_bg};
+                background-color: {secondary_btn_bg};
                 color: {text_muted};
-                border: 1px solid {secondary_btn_bg};
+                border: 1px solid {border_subtle};
                 border-bottom: none;
                 border-top-left-radius: 4px;
                 border-top-right-radius: 4px;
@@ -1715,12 +1619,13 @@ class SettingsDialog(QDialog):
             }}
             QTabBar::tab:selected {{
                 background-color: {accent};
-                color: #ffffff;
+                color: {text_bright};
                 border-color: {accent};
             }}
             QTabBar::tab:hover:!selected {{
-                background-color: {secondary_btn_bg};
+                background-color: {secondary_btn_hover};
                 color: {text_bright};
+                border-color: {secondary_btn_border};
             }}
             QComboBox {{
                 background-color: {input_bg};
@@ -1775,29 +1680,6 @@ class SettingsDialog(QDialog):
         if folder:
             self.ytdlp_folder_edit.setText(folder)
 
-    def on_browse_browser_img_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "Select Browser Image Pool Folder", self.browser_img_edit.text() or os.getcwd())
-        if folder:
-            self.browser_img_edit.setText(folder)
-
-    def on_browse_browser_vid_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "Select Browser Video Pool Folder", self.browser_vid_edit.text() or os.getcwd())
-        if folder:
-            self.browser_vid_edit.setText(folder)
-
-    def on_configure_pools(self):
-        from src.browser_pool_config_dialog import BrowserPoolConfigDialog
-        dlg = BrowserPoolConfigDialog(self.settings, self)
-        if dlg.exec() == QDialog.Accepted:
-            self.settings.update(dlg.settings)
-
-    def on_homepage_preset_changed(self, text):
-        is_custom = (text == "Custom")
-        self.custom_homepage_row.setVisible(is_custom)
-        if not is_custom:
-            preset_url = self.homepage_presets.get(text, "https://www.google.com")
-            self.browser_homepage_edit.setText(preset_url)
-
     def on_save(self):
         self.settings["ask_confirm"] = self.confirm_check.isChecked()
         self.settings["primary_folder"] = self.folder_edit.text()
@@ -1823,13 +1705,6 @@ class SettingsDialog(QDialog):
         self.settings["ytdlp_embed_thumbnail"] = self.ytdlp_thumbnail_check.isChecked()
         self.settings["ytdlp_crop_thumbnail"] = self.ytdlp_crop_thumbnail_check.isChecked()
         self.settings["ytdlp_show_recent_downloads"] = self.ytdlp_show_downloads_check.isChecked()
-
-        # Save Browser Settings
-        preset_name = self.browser_homepage_combo.currentText()
-        if preset_name == "Custom":
-            self.settings["browser_homepage"] = self.browser_homepage_edit.text()
-        else:
-            self.settings["browser_homepage"] = self.homepage_presets.get(preset_name, "https://www.google.com")
         
         self.accept()
 

@@ -90,9 +90,46 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Error loading DNS settings: {e}")
         
-    app = QApplication(sys.argv + dns_args)
+    profile_dir = os.path.join(get_app_data_dir(), "browser_profile")
+    os.makedirs(profile_dir, exist_ok=True)
+    chrome_flags = [
+        "--disable-blink-features=AutomationControlled",
+        f"--user-data-dir={profile_dir}"
+    ]
+    existing_flags = os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
+    new_flags = " ".join(chrome_flags)
+    os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = f"{existing_flags} {new_flags}".strip()
+    
+    app = QApplication(sys.argv + dns_args + chrome_flags)
     from src.widgets import LeftAlignTabProxy
     app.setStyle(LeftAlignTabProxy(app.style()))
+    
+    # Show dynamic Splash Screen on startup
+    from PySide6.QtGui import QPixmap, QPainter, QFont, QColor
+    from PySide6.QtWidgets import QSplashScreen
+    
+    splash_pixmap = QPixmap(420, 240)
+    splash_pixmap.fill(QColor("#18181b"))  # Match theme dialog_bg
+    
+    painter = QPainter(splash_pixmap)
+    # Draw border
+    painter.setPen(QColor("#3f3f46"))  # Muted border color
+    painter.drawRect(0, 0, 419, 239)
+    
+    # Title
+    painter.setFont(QFont("Segoe UI", 24, QFont.Bold))
+    painter.setPen(QColor("#ffffff"))
+    painter.drawText(24, 24, 372, 50, Qt.AlignLeft | Qt.AlignTop, "Meedia Studio")
+    
+    # Subtitle
+    painter.setFont(QFont("Segoe UI", 11))
+    painter.setPen(QColor("#94a3b8"))  # Match theme text_muted
+    painter.drawText(24, 180, 372, 36, Qt.AlignLeft | Qt.AlignBottom, "Loading creator tools...")
+    painter.end()
+    
+    splash = QSplashScreen(splash_pixmap)
+    splash.show()
+    app.processEvents()
     
     # Allow system SIGINT (Ctrl+C) to quit the application gracefully
     signal.signal(signal.SIGINT, lambda *args: QApplication.quit())
@@ -102,6 +139,7 @@ if __name__ == "__main__":
     timer.start(200)
     timer.timeout.connect(lambda: None)
     
-    window = MainWindow()
+    window = MainWindow(splash)
     window.show()
+    splash.finish(window)
     sys.exit(app.exec())

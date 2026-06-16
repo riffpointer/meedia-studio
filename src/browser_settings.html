@@ -1,0 +1,835 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  :root {
+    --bg-color: {{dialog_bg}};
+    --card-bg: {{card_bg}};
+    --accent: {{accent}};
+    --accent-hover: {{accent_hover}};
+    --border: {{border}};
+    --text: {{text}};
+    --text-muted: {{text_muted}};
+    --text-bright: {{text_bright}};
+    --input-bg: {{input_bg}};
+    --secondary-btn-bg: {{secondary_btn_bg}};
+    --secondary-btn-hover: {{secondary_btn_hover}};
+    --success-color: {{success}};
+    --scrollbar-handle: {{scrollbar_handle}};
+    --scrollbar-bg: {{scrollbar_bg}};
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: var(--scrollbar-bg);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-handle);
+    border-radius: 5px;
+    border: 2px solid var(--scrollbar-bg);
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--accent);
+  }
+  body {
+    background-color: var(--bg-color);
+    color: var(--text);
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    font-size: 13px;
+    margin: 0;
+    padding: 0;
+    overflow-x: hidden;
+  }
+  .container {
+    display: flex;
+    height: 100vh;
+  }
+  .sidebar {
+    position: relative;
+    width: 160px;
+    border-right: 1px solid var(--border);
+    background-color: var(--bg-color);
+    padding: 16px 8px;
+    box-sizing: border-box;
+  }
+  .sidebar-indicator {
+    position: absolute;
+    left: 0;
+    width: 3px;
+    height: 20px;
+    background-color: var(--accent);
+    transition: top 0.25s cubic-bezier(0.85, 0, 0.15, 1);
+    border-top-right-radius: 2px;
+    border-bottom-right-radius: 2px;
+    pointer-events: none;
+  }
+  .sidebar-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px 10px 16px;
+    margin-bottom: 6px;
+    border-radius: 6px;
+    cursor: pointer;
+    color: var(--text-muted);
+    font-weight: 500;
+    transition: background-color 0.2s, color 0.2s;
+  }
+  .sidebar-item svg {
+    flex-shrink: 0;
+  }
+  .sidebar-item:hover, .sidebar-item.active {
+    background-color: var(--card-bg);
+    color: var(--text-bright);
+  }
+  .content {
+    flex: 1;
+    padding: 20px;
+    overflow-y: auto;
+    box-sizing: border-box;
+  }
+  h1 {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--text-bright);
+    margin-top: 0;
+    margin-bottom: 20px;
+  }
+  @keyframes slideIn {
+    from {
+      transform: translateY(8px);
+    }
+    to {
+      transform: translateY(0);
+    }
+  }
+  .section {
+    display: none;
+  }
+  .section.active {
+    display: block;
+    animation: slideIn 300ms ease-out forwards;
+  }
+  .card {
+    background: none;
+    border: none;
+    border-radius: 0;
+    padding: 0;
+    margin-bottom: 24px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 24px;
+  }
+  .card:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
+    padding-bottom: 0;
+  }
+  .card-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-bright);
+    margin-bottom: 12px;
+  }
+  .form-group {
+    margin-bottom: 16px;
+  }
+  .form-group:last-child {
+    margin-bottom: 0;
+  }
+  label {
+    display: block;
+    margin-bottom: 6px;
+    color: var(--text-muted);
+  }
+  select, input[type="text"] {
+    width: 100%;
+    background-color: var(--input-bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 8px;
+    color: var(--text);
+    box-sizing: border-box;
+    font-size: 12px;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  select:focus, input[type="text"]:focus {
+    border-color: var(--accent);
+  }
+  .checkbox-group {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    user-select: none;
+    color: var(--text-bright);
+  }
+  .checkbox-group input {
+    margin-right: 8px;
+    accent-color: var(--accent);
+    width: 16px;
+    height: 16px;
+  }
+  .btn {
+    background-color: var(--secondary-btn-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-bright);
+    padding: 8px 16px;
+    cursor: pointer;
+    font-weight: bold;
+    transition: background-color 0.2s;
+    font-size: 12px;
+    outline: none;
+  }
+  .btn:hover {
+    background-color: var(--secondary-btn-hover);
+  }
+  .note {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 8px;
+  }
+  .about-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .about-list li {
+    margin-bottom: 8px;
+    color: var(--text);
+  }
+  .about-list strong {
+    color: var(--text-bright);
+  }
+  .pool-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    background-color: var(--card-bg);
+    padding: 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    margin-bottom: 8px;
+  }
+  .pool-row input.pool-name {
+    width: 160px;
+  }
+  .pool-row input.pool-path {
+    flex: 1;
+  }
+  .pool-row button.btn-icon {
+    background: none;
+    border: 1px solid var(--border);
+    background-color: var(--secondary-btn-bg);
+    border-radius: 4px;
+    padding: 6px;
+    cursor: pointer;
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.2s, border-color 0.2s;
+  }
+  .pool-row button.btn-icon:hover {
+    background-color: var(--secondary-btn-hover);
+    color: var(--text-bright);
+    border-color: var(--accent);
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="sidebar">
+    <div class="sidebar-indicator" id="sidebar-indicator"></div>
+    <div class="sidebar-item active" onclick="showSection('network')">
+      <!-- Bootstrap Globe SVG -->
+      <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0M2.04 4.326c.325 1.329 2.532 2.54 3.758 3.19.2.106.406.192.61.26a16.326 16.326 0 0 0-.083-1.424 10.826 10.826 0 0 1-4.285-2.026M1.002 8a7.002 7.002 0 0 1 1.03-3.693c.3.948 1.488 2.036 3.013 2.802a18.847 18.847 0 0 0-.903.79 5.163 5.163 0 0 1-3.138-.79M8 1.002a7.002 7.002 0 0 1 3.693 1.03c-.948.3-2.036 1.488-2.802 3.013a18.847 18.847 0 0 0-.79-.903c-.274-.287-.565-.544-.868-.772A5.163 5.163 0 0 1 8 1.002"/></svg>
+      Connection
+    </div>
+    <div class="sidebar-item" onclick="showSection('startup')">
+      <!-- Bootstrap Rocket SVG -->
+      <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M8 0c-.535 0-.965.43-.965.965 0 .323.16.608.406.786l-2.062 4.126a3.5 3.5 0 0 0-2.316 2.316L.2 11.233a.5.5 0 0 0 .6.6l3.038-.76a3.5 3.5 0 0 0 2.316-2.316l2.063-4.127A.965.965 0 0 0 8 0z"/></svg>
+      Startup
+    </div>
+    <div class="sidebar-item" onclick="showSection('pools')">
+      <!-- Bootstrap Folder SVG -->
+      <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M9.828 3h3.982a2 2 0 0 1 1.992 2.181l-.637 7A2 2 0 0 1 13.174 14H2.826a2 2 0 0 1-1.991-1.819l-.637-7a1.99 1.99 0 0 1 .342-1.31L.5 3a2 2 0 0 1 2-2h3.672a2 2 0 0 1 1.414.586l.828.828A2 2 0 0 0 9.828 3m-1.887.113C7.81 3.043 7.662 3 7.5 3H2.5a1 1 0 0 0-1 .981L1.463 6h13.074l-.037-.419a1 1 0 0 0-1-.981H9.828a2 2 0 0 1-1.414-.586l-.828-.828zM1.494 7l.59 6.5A1 1 0 0 0 3.078 14h9.844a1 1 0 0 0 .994-.906l.59-6.5z"/></svg>
+      Media Pools
+    </div>
+    <div class="sidebar-item" onclick="showSection('privacy')">
+      <!-- Bootstrap Lock SVG -->
+      <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M8 1a2 2 0 0 1 2 2v4H6V3a2 2 0 0 1 2-2zm3 6V3a3 3 0 0 0-6 0v4a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z"/></svg>
+      Privacy
+    </div>
+    <div class="sidebar-item" onclick="showSection('shortcuts')">
+      <!-- Bootstrap Keyboard SVG -->
+      <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M14 3a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zM2 2a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2z"/><path d="M2.5 5h1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-1a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5m3 0h1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-1a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5m3 0h1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-1a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5m3 0h1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-1a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5m-9 3h1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-1a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5m3 0h1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-1a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5m3 0h1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-1a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5m3 0h1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-1a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5M5 11h6a.5.5 0 0 1 0 1H5a.5.5 0 0 1 0-1"/></svg>
+      Shortcuts
+    </div>
+    <div class="sidebar-item" onclick="showSection('history')">
+      <!-- Bootstrap Clock SVG -->
+      <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M8 3.5a.5.5 0 0 0-1 0V9a.5.5 0 0 0 .252.434l3.5 2a.5.5 0 0 0 .496-.868L8 8.71z"/><path d="M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16m7-8A7 7 0 1 1 1 8a7 7 0 0 1 14 0"/></svg>
+      History
+    </div>
+    <!-- NOTE: Always insert new tabs BEFORE the About tab so that About remains the last tab in the sidebar. -->
+    <div class="sidebar-item" onclick="showSection('about')">
+      <!-- Bootstrap Info Circle SVG -->
+      <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/><path d="m8.93 6.588-2.29.287-.082.38.45.083c.294.07.352.176.288.469l-.738 3.468c-.194.897.105 1.319.808 1.319.545 0 1.178-.252 1.465-.598l.088-.416c-.2.176-.492.246-.686.246-.275 0-.375-.193-.304-.533L8.93 6.588zM9 4.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0z"/></svg>
+      About
+    </div>
+  </div>
+  <div class="content">
+    <!-- Connection Section -->
+    <div id="section-network" class="section active">
+      <h1>Connection Settings</h1>
+      <div class="card">
+        <div class="card-title">DNS-over-HTTPS (DoH)</div>
+        <div class="form-group">
+          <select id="dns-select" onchange="toggleCustomDns()">
+            <option value="Default">Default (System)</option>
+            <option value="AdGuard">AdGuard DNS (adblock)</option>
+            <option value="Cloudflare">Cloudflare DNS</option>
+            <option value="Google">Google DNS</option>
+            <option value="Custom">Custom DoH URL</option>
+          </select>
+        </div>
+        <div class="form-group" id="custom-dns-group" style="display: none;">
+          <label for="custom-dns-input">Custom DoH Provider URL</label>
+          <input type="text" id="custom-dns-input" placeholder="https://example.com/dns-query">
+        </div>
+        <div class="note">* DNS settings require restarting the application to take effect.</div>
+      </div>
+      <div class="card">
+        <div class="card-title">User-Agent Profile</div>
+        <div class="form-group">
+          <select id="ua-select" onchange="toggleCustomUa()">
+            <option value="Default">Default (Desktop)</option>
+            <option value="Mobile">Mobile (iPhone/Safari)</option>
+            <option value="Custom">Custom User-Agent</option>
+          </select>
+        </div>
+        <div class="form-group" id="custom-ua-group" style="display: none;">
+          <label for="custom-ua-input">Custom User-Agent String</label>
+          <input type="text" id="custom-ua-input" placeholder="Mozilla/5.0 ...">
+        </div>
+      </div>
+    </div>
+
+    <!-- Startup Section -->
+    <div id="section-startup" class="section">
+      <h1>Startup & Homepage</h1>
+      <div class="card">
+        <div class="card-title">Startup Navigation</div>
+        <div class="form-group">
+          <label class="checkbox-group">
+            <input type="checkbox" id="restore-session-checkbox">
+            Restore open tabs from last session
+          </label>
+        </div>
+        <div class="form-group">
+          <label class="checkbox-group">
+            <input type="checkbox" id="reopen-checkbox">
+            Reopen last page when starting browser (if session restore is off)
+          </label>
+        </div>
+        <div class="form-group">
+          <label class="checkbox-group">
+            <input type="checkbox" id="hide-all-tabs-checkbox">
+            Hide "All Tabs" overflow menu button in the tab bar
+          </label>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Memory Optimization</div>
+        <div class="form-group">
+          <label for="suspend-timeout-input">Suspend background tabs after (minutes):</label>
+          <input type="number" id="suspend-timeout-input" min="0" step="1" value="15">
+          <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">Set to 0 to disable tab suspension. Suspended tabs free up memory and reload when clicked.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Homepage URL</div>
+        <div class="form-group">
+          <select id="homepage-select" onchange="toggleCustomHomepage()">
+            <option value="Google Search">Google Search</option>
+            <option value="Google Image Search">Google Image Search</option>
+            <option value="DuckDuckGo Search">DuckDuckGo Search</option>
+            <option value="DuckDuckGo Image Search">DuckDuckGo Image Search</option>
+            <option value="Pinterest">Pinterest</option>
+            <option value="PNGWing">PNGWing</option>
+            <option value="Bing Images">Bing Images</option>
+            <option value="Custom">Custom URL</option>
+          </select>
+        </div>
+        <div class="form-group" id="custom-homepage-group" style="display: none;">
+          <label for="custom-homepage-input">Custom Homepage URL</label>
+          <input type="text" id="custom-homepage-input" placeholder="https://www.google.com">
+        </div>
+      </div>
+    </div>
+
+    <!-- Media Pools Section -->
+    <div id="section-pools" class="section">
+      <h1>Media Pools</h1>
+      <div class="card">
+        <div class="card-title">Configure Directory Paths for Media Imports & Downloads</div>
+        <div id="pools-list" style="display: flex; flex-direction: column; gap: 4px;">
+          <!-- Pool entries generated dynamically -->
+        </div>
+        <div style="margin-top: 16px;">
+          <button class="btn" style="background-color: var(--accent); border-color: var(--accent);" onclick="addNewPoolRow()">+ Add New Pool</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Privacy Section -->
+    <div id="section-privacy" class="section">
+      <h1>Privacy & History</h1>
+      
+      <div class="card">
+        <div class="card-title">Site Permissions</div>
+        <div class="form-group">
+          <div id="permissions-container" style="max-height: 200px; overflow-y: auto; border: 1px solid var(--border); border-radius: 4px; padding: 4px; background-color: var(--input-bg);">
+            <div style="color: var(--text-muted); padding: 8px;">Loading permissions...</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top: 16px;">
+        <div class="card-title">Browsing Data</div>
+        <div style="display: flex; gap: 8px;">
+          <button class="btn" id="clear-history-btn" onclick="triggerAction('clear-history')">Clear History</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- History Section -->
+    <div id="section-history" class="section">
+      <h1>Browsing History</h1>
+      <div class="card">
+        <div class="card-title">Recent Pages (Double-click to open in new tab)</div>
+        <div class="form-group">
+          <div id="history-container" style="max-height: 320px; overflow-y: auto; border: 1px solid var(--border); border-radius: 4px; padding: 4px; background-color: var(--input-bg);">
+            <div style="color: var(--text-muted); padding: 8px;">Loading history...</div>
+          </div>
+        </div>
+        <div style="display: flex; gap: 8px; margin-top: 12px;">
+          <button class="btn" id="clear-history-btn-2" onclick="triggerAction('clear-history')">Clear History</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- About Section -->
+    <div id="section-about" class="section">
+      <h1>About Browser</h1>
+      <div class="card">
+        <div class="card-title">Component Information</div>
+        <ul class="about-list">
+          <li><strong>Qt Core Version:</strong> <span id="about-qt-version">...</span></li>
+          <li><strong>Chromium Engine Version:</strong> <span id="about-chrome-version">...</span></li>
+          <li><strong>Python Version:</strong> <span id="about-python-version">...</span></li>
+          <li><strong>Storage Directory:</strong> <span id="about-storage-path" style="word-break: break-all; font-family: monospace;">...</span></li>
+          <li><strong>Cache Directory:</strong> <span id="about-cache-path" style="word-break: break-all; font-family: monospace;">...</span><button id="choose-cache-btn" class="btn" style="padding: 2px 8px; font-size: 11px; margin-left: 8px; display: none;" onclick="triggerAction('choose-cache')">Choose...</button></li>
+          <li><strong>User-Agent:</strong> <span id="about-user-agent" style="word-break: break-all; font-family: monospace;">...</span></li>
+          <li><strong>OS Version:</strong> <span id="about-os-version">...</span></li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Shortcuts Section -->
+    <div id="section-shortcuts" class="section">
+      <h1>Browser Shortcuts</h1>
+      <div class="card">
+        <div class="card-title">Tab Navigation Shortcuts</div>
+        <div class="form-group">
+          <label for="shortcut-close-tab">Close Active Tab</label>
+          <input type="text" id="shortcut-close-tab" placeholder="Ctrl+W">
+        </div>
+        <div class="form-group">
+          <label for="shortcut-next-tab">Next Tab</label>
+          <input type="text" id="shortcut-next-tab" placeholder="Ctrl+Tab">
+        </div>
+        <div class="form-group">
+          <label for="shortcut-prev-tab">Previous Tab</label>
+          <input type="text" id="shortcut-prev-tab" placeholder="Ctrl+Shift+Tab">
+        </div>
+        <div class="note">* Shortcuts require a restart of the tab to fully update. Format example: "Ctrl+W", "Ctrl+Tab".</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  function updateIndicator(element) {
+    const indicator = document.getElementById('sidebar-indicator');
+    if (indicator && element) {
+      const relativeTop = element.offsetTop + (element.offsetHeight - 20) / 2;
+      indicator.style.top = relativeTop + 'px';
+    }
+  }
+
+  function showSection(id) {
+    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+    document.querySelectorAll('.sidebar-item').forEach(item => item.classList.remove('active'));
+    
+    document.getElementById('section-' + id).classList.add('active');
+    const currentTab = event.currentTarget;
+    currentTab.classList.add('active');
+    updateIndicator(currentTab);
+  }
+
+  function toggleCustomDns() {
+    const val = document.getElementById('dns-select').value;
+    document.getElementById('custom-dns-group').style.display = val === 'Custom' ? 'block' : 'none';
+  }
+
+  function toggleCustomUa() {
+    const val = document.getElementById('ua-select').value;
+    document.getElementById('custom-ua-group').style.display = val === 'Custom' ? 'block' : 'none';
+  }
+
+  function toggleCustomHomepage() {
+    const val = document.getElementById('homepage-select').value;
+    document.getElementById('custom-homepage-group').style.display = val === 'Custom' ? 'block' : 'none';
+  }
+
+  function triggerAction(name) {
+    window.location.href = 'action://' + name;
+  }
+
+  window.revokePermission = function(origin, feature) {
+    triggerAction('revoke-permission/' + encodeURIComponent(origin) + '/' + feature);
+  };
+
+  let poolRowCounter = 0;
+  function addPoolRow(name, path) {
+    const id = 'pool_row_' + (++poolRowCounter);
+    const row = document.createElement('div');
+    row.className = 'pool-row';
+    row.id = id;
+    row.innerHTML = `
+      <input type="text" class="pool-name" value="${name || ''}" placeholder="pool_name">
+      <input type="text" class="pool-path" id="${id}_path" value="${path || ''}" placeholder="Folder directory path">
+      <button class="btn-icon" title="Browse Folder" onclick="browsePoolPath('${id}')">
+        <svg width="14" height="14" fill="currentColor" viewBox="0 0 16 16"><path d="M9.828 3h3.982a2 2 0 0 1 1.992 2.181l-.637 7A2 2 0 0 1 13.174 14H2.826a2 2 0 0 1-1.991-1.819l-.637-7a1.99 1.99 0 0 1 .342-1.31L.5 3a2 2 0 0 1 2-2h3.672a2 2 0 0 1 1.414.586l.828.828A2 2 0 0 0 9.828 3m-1.887.113C7.81 3.043 7.662 3 7.5 3H2.5a1 1 0 0 0-1 .981L1.463 6h13.074l-.037-.419a1 1 0 0 0-1-.981H9.828a2 2 0 0 1-1.414-.586l-.828-.828zM1.494 7l.59 6.5A1 1 0 0 0 3.078 14h9.844a1 1 0 0 0 .994-.906l.59-6.5z"/></svg>
+      </button>
+      <button class="btn-icon" title="Delete Pool" onclick="deletePoolRow('${id}')">
+        <svg width="14" height="14" fill="currentColor" viewBox="0 0 16 16"><path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0z"/><path d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4zM2.5 3h11V2h-11z"/></svg>
+      </button>
+    `;
+    document.getElementById('pools-list').appendChild(row);
+  }
+
+  function addNewPoolRow() {
+    addPoolRow('', '');
+  }
+
+  function deletePoolRow(id) {
+    const row = document.getElementById(id);
+    if (row) {
+      row.remove();
+    }
+  }
+
+  function browsePoolPath(rowId) {
+    triggerAction('browse-pool-path/' + rowId);
+  }
+
+  window.updatePoolPath = function(rowId, folderPath) {
+    const input = document.getElementById(rowId + '_path');
+    if (input) {
+      input.value = folderPath;
+    }
+  };
+
+  window.loadSettings = function(dns, customUrl, reopen, restoreSession, uaType, customUa, shortcutCloseTab, shortcutNextTab, shortcutPrevTab, historyList, homepage, poolData, hideAllTabsButton, browserPermissions, suspendTimeout) {
+    document.getElementById('dns-select').value = dns;
+    document.getElementById('custom-dns-input').value = customUrl;
+    document.getElementById('reopen-checkbox').checked = reopen;
+    document.getElementById('restore-session-checkbox').checked = restoreSession;
+    document.getElementById('hide-all-tabs-checkbox').checked = !!hideAllTabsButton;
+    document.getElementById('ua-select').value = uaType || "Default";
+    document.getElementById('custom-ua-input').value = customUa || "";
+    document.getElementById('shortcut-close-tab').value = shortcutCloseTab || "Ctrl+W";
+    document.getElementById('shortcut-next-tab').value = shortcutNextTab || "Ctrl+Tab";
+    document.getElementById('shortcut-prev-tab').value = shortcutPrevTab || "Ctrl+Shift+Tab";
+    if (document.getElementById('suspend-timeout-input')) {
+      document.getElementById('suspend-timeout-input').value = suspendTimeout !== undefined ? suspendTimeout : 15;
+    }
+    toggleCustomDns();
+    toggleCustomUa();
+
+    // Set homepage
+    const presets = {
+      "https://www.google.com": "Google Search",
+      "https://www.google.com/imghp": "Google Image Search",
+      "https://duckduckgo.com": "DuckDuckGo Search",
+      "https://duckduckgo.com/?iax=images&ia=images": "DuckDuckGo Image Search",
+      "https://www.pinterest.com": "Pinterest",
+      "https://www.pngwing.com": "PNGWing",
+      "https://www.bing.com/images": "Bing Images"
+    };
+    const presetName = presets[homepage];
+    if (presetName) {
+      document.getElementById('homepage-select').value = presetName;
+      document.getElementById('custom-homepage-input').value = homepage;
+    } else {
+      document.getElementById('homepage-select').value = "Custom";
+      document.getElementById('custom-homepage-input').value = homepage || "https://www.google.com";
+    }
+    toggleCustomHomepage();
+
+    // Load pools
+    const listDiv = document.getElementById('pools-list');
+    listDiv.innerHTML = '';
+    if (poolData) {
+      Object.keys(poolData).forEach(name => {
+        addPoolRow(name, poolData[name]);
+      });
+    }
+
+    // Populate permissions
+    const permContainer = document.getElementById('permissions-container');
+    if (permContainer) {
+      permContainer.innerHTML = '';
+      let hasPerms = false;
+      if (browserPermissions) {
+        Object.keys(browserPermissions).forEach(origin => {
+          const originPerms = browserPermissions[origin];
+          Object.keys(originPerms).forEach(feature => {
+            hasPerms = true;
+            const allowed = originPerms[feature];
+            
+            const row = document.createElement('div');
+            row.id = 'perm-' + origin + '-' + feature;
+            row.style.padding = '8px 12px';
+            row.style.borderBottom = '1px solid var(--border)';
+            row.style.display = 'flex';
+            row.style.alignItems = 'center';
+            row.style.justifyContent = 'space-between';
+            row.style.color = 'var(--text)';
+            
+            const textDiv = document.createElement('div');
+            
+            const originSpan = document.createElement('div');
+            originSpan.style.color = 'var(--text-bright)';
+            originSpan.style.fontWeight = '500';
+            originSpan.innerText = origin;
+            textDiv.appendChild(originSpan);
+            
+            const featureNames = {
+                "0": "Notifications", "1": "Geolocation", "2": "Camera", "3": "Microphone", 
+                "4": "Camera & Microphone", "5": "Notifications", "7": "Desktop Video Capture"
+            };
+            
+            const detailSpan = document.createElement('div');
+            detailSpan.style.color = 'var(--text-muted)';
+            detailSpan.style.fontSize = '11px';
+            const statusText = allowed ? "Allowed" : "Blocked";
+            const featureName = featureNames[feature] || "Feature " + feature;
+            detailSpan.innerText = featureName + " - " + statusText;
+            textDiv.appendChild(detailSpan);
+            
+            row.appendChild(textDiv);
+            
+            const revokeBtn = document.createElement('button');
+            revokeBtn.className = 'btn';
+            revokeBtn.style.padding = '4px 8px';
+            revokeBtn.style.fontSize = '11px';
+            revokeBtn.innerText = 'Revoke';
+            revokeBtn.onclick = function() {
+              window.revokePermission(origin, feature);
+            };
+            row.appendChild(revokeBtn);
+            
+            permContainer.appendChild(row);
+          });
+        });
+      }
+      if (!hasPerms) {
+        permContainer.innerHTML = '<div style="color: var(--text-muted); padding: 8px;">No site permissions stored.</div>';
+      } else if (permContainer.lastChild) {
+        permContainer.lastChild.style.borderBottom = 'none';
+      }
+    }
+
+    // Populate history container
+    const container = document.getElementById('history-container');
+    if (container) {
+      container.innerHTML = '';
+      if (historyList && historyList.length > 0) {
+        historyList.slice().reverse().forEach(item => {
+          let url = "";
+          let title = "";
+          let icon = "";
+          if (typeof item === 'string') {
+            url = item;
+          } else if (item && typeof item === 'object') {
+            url = item.url || "";
+            title = item.title || "";
+            icon = item.icon || "";
+          }
+          if (!url) return;
+
+          const row = document.createElement('div');
+          row.style.padding = '8px 12px';
+          row.style.borderBottom = '1px solid var(--border)';
+          row.style.cursor = 'pointer';
+          row.style.display = 'flex';
+          row.style.alignItems = 'center';
+          row.style.gap = '8px';
+          row.style.color = 'var(--text)';
+          
+          row.onmouseover = () => row.style.backgroundColor = 'var(--card-bg)';
+          row.onmouseout = () => row.style.backgroundColor = 'transparent';
+          
+          row.ondblclick = () => {
+            triggerAction('navigate-history/' + encodeURIComponent(url));
+          };
+
+          // Favicon
+          const img = document.createElement('img');
+          img.width = 16;
+          img.height = 16;
+          img.src = icon || `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="%2394a3b8" viewBox="0 0 16 16"><path d="M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0M2.04 4.326c.325 1.329 2.532 2.54 3.758 3.19.2.106.406.192.61.26a16.326 16.326 0 0 0-.083-1.424 10.826 10.826 0 0 1-4.285-2.026M1.002 8a7.002 7.002 0 0 1 1.03-3.693c.3.948 1.488 2.036 3.013 2.802a18.847 18.847 0 0 0-.903.79 5.163 5.163 0 0 1-3.138-.79M8 1.002a7.002 7.002 0 0 1 3.693 1.03c-.948.3-2.036 1.488-2.802 3.013a18.847 18.847 0 0 0-.79-.903c-.274-.287-.565-.544-.868-.772A5.163 5.163 0 0 1 8 1.002"/></svg>`;
+          img.style.flexShrink = '0';
+          img.style.borderRadius = '2px';
+          row.appendChild(img);
+
+          // Text container
+          const textDiv = document.createElement('div');
+          textDiv.style.flex = '1';
+          textDiv.style.minWidth = '0';
+          textDiv.style.whiteSpace = 'nowrap';
+          textDiv.style.overflow = 'hidden';
+          textDiv.style.textOverflow = 'ellipsis';
+          
+          if (title) {
+            const titleSpan = document.createElement('span');
+            titleSpan.style.color = 'var(--text-bright)';
+            titleSpan.style.fontWeight = '500';
+            titleSpan.style.marginRight = '8px';
+            titleSpan.innerText = title;
+            textDiv.appendChild(titleSpan);
+          }
+          
+          const urlSpan = document.createElement('span');
+          urlSpan.style.color = 'var(--text-muted)';
+          urlSpan.style.fontSize = '11px';
+          urlSpan.innerText = url;
+          textDiv.appendChild(urlSpan);
+
+          row.appendChild(textDiv);
+          container.appendChild(row);
+        });
+        if (container.lastChild) {
+          container.lastChild.style.borderBottom = 'none';
+        }
+      } else {
+        container.innerHTML = '<div style="color: var(--text-muted); padding: 8px;">No history records found.</div>';
+      }
+    }
+
+    // Set initial indicator position
+    const activeItem = document.querySelector('.sidebar-item.active');
+    if (activeItem) {
+      setTimeout(() => updateIndicator(activeItem), 50);
+    }
+  };
+
+  window.getSettingsData = function() {
+    const pools = {};
+    document.querySelectorAll('.pool-row').forEach(row => {
+      const name = row.querySelector('.pool-name').value.trim();
+      const path = row.querySelector('.pool-path').value.trim();
+      if (name) {
+        pools[name] = path;
+      }
+    });
+
+    const presetHome = document.getElementById('homepage-select').value;
+    let homepage = "";
+    if (presetHome === "Custom") {
+      homepage = document.getElementById('custom-homepage-input').value.trim();
+    } else {
+      const homePresets = {
+        "Google Search": "https://www.google.com",
+        "Google Image Search": "https://www.google.com/imghp",
+        "DuckDuckGo Search": "https://duckduckgo.com",
+        "DuckDuckGo Image Search": "https://duckduckgo.com/?iax=images&ia=images",
+        "Pinterest": "https://www.pinterest.com",
+        "PNGWing": "https://www.pngwing.com",
+        "Bing Images": "https://www.bing.com/images"
+      };
+      homepage = homePresets[presetHome] || "https://www.google.com";
+    }
+
+    return JSON.stringify({
+      dns: document.getElementById('dns-select').value,
+      customUrl: document.getElementById('custom-dns-input').value,
+      reopen: document.getElementById('reopen-checkbox').checked,
+      restoreSession: document.getElementById('restore-session-checkbox').checked,
+      uaType: document.getElementById('ua-select').value,
+      customUa: document.getElementById('custom-ua-input').value,
+      shortcutCloseTab: document.getElementById('shortcut-close-tab').value.trim(),
+      shortcutNextTab: document.getElementById('shortcut-next-tab').value.trim(),
+      shortcutPrevTab: document.getElementById('shortcut-prev-tab').value.trim(),
+      homepage: homepage,
+      pools: pools,
+      suspendTimeout: parseInt(document.getElementById('suspend-timeout-input').value) || 0,
+      hideAllTabsButton: document.getElementById('hide-all-tabs-checkbox').checked
+    });
+  };
+
+  window.markHistoryCleared = function() {
+    const btn = document.getElementById('clear-history-btn');
+    if (btn) {
+      btn.innerHTML = '✓ Cleared';
+      btn.style.backgroundColor = 'var(--success-color)';
+      btn.style.borderColor = 'var(--success-color)';
+      btn.style.color = '#ffffff';
+      btn.disabled = true;
+    }
+    const btn2 = document.getElementById('clear-history-btn-2');
+    if (btn2) {
+      btn2.innerHTML = '✓ Cleared';
+      btn2.style.backgroundColor = 'var(--success-color)';
+      btn2.style.borderColor = 'var(--success-color)';
+      btn2.style.color = '#ffffff';
+      btn2.disabled = true;
+    }
+    const container = document.getElementById('history-container');
+    if (container) {
+      container.innerHTML = '<div style="color: var(--text-muted); padding: 8px;">No history records found.</div>';
+    }
+  };
+
+  window.updateCachePath = function(cachePath) {
+    const cacheEl = document.getElementById('about-cache-path');
+    const chooseBtn = document.getElementById('choose-cache-btn');
+    if (!cachePath || cachePath.trim() === "") {
+      cacheEl.innerText = 'Not Set';
+      cacheEl.style.color = 'var(--text-muted)';
+      chooseBtn.style.display = 'inline-block';
+    } else {
+      cacheEl.innerText = cachePath;
+      cacheEl.style.color = '';
+      chooseBtn.style.display = 'none';
+    }
+  };
+
+  window.loadAboutDetails = function(qtVersion, chromeVersion, storagePath, cachePath, osVersion, pythonVersion, userAgent) {
+    document.getElementById('about-qt-version').innerText = qtVersion;
+    document.getElementById('about-chrome-version').innerText = chromeVersion;
+    document.getElementById('about-python-version').innerText = pythonVersion;
+    document.getElementById('about-storage-path').innerText = storagePath || 'Not Set';
+    window.updateCachePath(cachePath);
+    document.getElementById('about-user-agent').innerText = userAgent || '';
+    document.getElementById('about-os-version').innerText = osVersion;
+  };
+</script>
+</body>
+</html>

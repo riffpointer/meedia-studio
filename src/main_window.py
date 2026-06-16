@@ -127,8 +127,9 @@ def get_theme_colors():
     }
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, splash=None):
         super().__init__()
+        self.splash = splash
         self.setWindowTitle("Meedia Studio")
         self.resize(950, 750)
         self.bg_cards = []
@@ -174,6 +175,8 @@ class MainWindow(QMainWindow):
         
         # Apply theme stylesheet dynamically
         self.apply_theme()
+        
+        self.update_splash("Initializing core modules and parameters...")
         
         # Central layout
         central_widget = QWidget(self)
@@ -238,6 +241,7 @@ class MainWindow(QMainWindow):
         self.tabs.setTabPosition(QTabWidget.West)
         self.tabs.setStyleSheet("")
         
+        self.update_splash("Loading Background Remover ML components...")
         # 1. Background Remover Tab Widget
         self.bg_tab = QWidget()
         bg_layout = QVBoxLayout(self.bg_tab)
@@ -288,6 +292,7 @@ class MainWindow(QMainWindow):
         
         self.tabs.addTab(self.bg_tab, QIcon("res/icons/bootstrap-png/person-bounding-box.png"), "BG Remover")
         
+        self.update_splash("Loading AI Upscaler models & neural layers...")
         # 2. AI Upscaler Tab Widget
         self.upscaler_tab = QWidget()
         upscaler_layout = QVBoxLayout(self.upscaler_tab)
@@ -342,6 +347,7 @@ class MainWindow(QMainWindow):
         
         self.tabs.addTab(self.upscaler_tab, QIcon("res/icons/bootstrap-png/arrows-angle-expand.png"), "AI Upscaler")
         
+        self.update_splash("Loading SVG Vectorizer path tracing algorithms...")
         # 3. SVG Vectorizer Tab Widget
         self.vectorizer_tab = QWidget()
         vectorizer_layout = QVBoxLayout(self.vectorizer_tab)
@@ -395,6 +401,7 @@ class MainWindow(QMainWindow):
         
         self.tabs.addTab(self.vectorizer_tab, QIcon("res/icons/bootstrap-png/vector-pen.png"), "SVG Vectorizer")
         
+        self.update_splash("Loading Image Restoration & Denoising tools...")
         # 4. Restoration Tab Widget
         self.restoration_tab = QWidget()
         restoration_layout = QVBoxLayout(self.restoration_tab)
@@ -448,7 +455,7 @@ class MainWindow(QMainWindow):
         
         self.tabs.addTab(self.restoration_tab, QIcon("res/icons/bootstrap-png/magic.png"), "Denoise && Deblur")
         
-
+        self.update_splash("Loading Video Converter rendering engines...")
         # 5. Video to GIF/WebP Tab Widget
         self.vid_tab = QWidget()
         vid_layout = QVBoxLayout(self.vid_tab)
@@ -498,6 +505,7 @@ class MainWindow(QMainWindow):
         
         self.tabs.addTab(self.vid_tab, QIcon("res/icons/bootstrap-png/play-fill.png"), "Video Converter")
 
+        self.update_splash("Loading Smart Crop facial recognition bounds...")
         # 8. Smart Crop Tab Widget
         self.crop_tab = QWidget()
         crop_layout = QVBoxLayout(self.crop_tab)
@@ -546,6 +554,7 @@ class MainWindow(QMainWindow):
         
         self.tabs.addTab(self.crop_tab, QIcon("res/icons/bootstrap-png/crop.png"), "Smart Crop")
 
+        self.update_splash("Loading Favicon Generator formatting engines...")
         # 9. Favicon Tab Widget
         self.icon_tab = QWidget()
         icon_layout = QVBoxLayout(self.icon_tab)
@@ -594,7 +603,7 @@ class MainWindow(QMainWindow):
         
         self.tabs.addTab(self.icon_tab, QIcon("res/icons/bootstrap-png/app-indicator.png"), "Favicon Gen")
 
-
+        self.update_splash("Loading Metadata Extraction definitions...")
         # 10. Metadata Tab Widget
         self.meta_tab = QWidget()
         meta_layout = QVBoxLayout(self.meta_tab)
@@ -643,6 +652,7 @@ class MainWindow(QMainWindow):
         
         self.tabs.addTab(self.meta_tab, QIcon("res/icons/bootstrap-png/info-circle.png"), "Metadata")
 
+        self.update_splash("Loading Google Fonts catalog synchronizer...")
         # 6. Google Fonts Downloader Tab Widget
         self.fonts_tab = QWidget()
         fonts_layout = QVBoxLayout(self.fonts_tab)
@@ -781,14 +791,18 @@ class MainWindow(QMainWindow):
         
         self.tabs.addTab(self.fonts_tab, QIcon("res/icons/bootstrap-png/fonts.png"), "Google Fonts")
         
+        self.update_splash("Loading Soundboard API connectors...")
         # 6. MyInstants Tab Widget
         self.myinstants_tab = MyInstantsTab(self)
         self.tabs.addTab(self.myinstants_tab, QIcon("res/icons/bootstrap-png/boombox.png"), "Soundboard")
 
+        self.update_splash("Loading YTDLP media download workers...")
         # 7. YTDLP Tab Widget
         self.ytdlp_tab = YTDLPTab(self)
         self.tabs.addTab(self.ytdlp_tab, QIcon("res/icons/bootstrap-png/download.png"), "YTDLP")
+        self.btn_my_downloads.clicked.connect(self.ytdlp_tab.go_to_downloads_grid)
 
+        self.update_splash("Loading Chromium Browser Engine & WebEngineViews...")
         # 8. Browser Tab Widget
         self.browser_tab = BrowserTab(self)
         self.tabs.addTab(self.browser_tab, QIcon("res/icons/bootstrap-png/globe.png"), "Browser")
@@ -838,6 +852,8 @@ class MainWindow(QMainWindow):
         
         main_layout.addLayout(footer_layout)
         
+        self.update_splash("Finalizing UI layout & restoring shortcuts...")
+        
         # ── Keyboard Shortcuts ────────────────────────────────────────────────
         self._register_shortcuts()
         
@@ -884,6 +900,25 @@ class MainWindow(QMainWindow):
                     self.current_dirs.append(browser_img_pool)
             
         self.load_directories(self.current_dirs)
+        
+    def update_splash(self, message):
+        if hasattr(self, 'splash') and self.splash:
+            from PySide6.QtGui import QPainter, QFont, QColor
+            from PySide6.QtCore import Qt
+            from PySide6.QtWidgets import QApplication
+            
+            pixmap = self.splash.pixmap()
+            painter = QPainter(pixmap)
+            
+            painter.fillRect(24, 180, 372, 36, QColor("#18181b"))
+            
+            painter.setFont(QFont("Segoe UI", 11))
+            painter.setPen(QColor("#94a3b8"))
+            painter.drawText(24, 180, 372, 36, Qt.AlignLeft | Qt.AlignBottom, message)
+            painter.end()
+            
+            self.splash.setPixmap(pixmap)
+            QApplication.processEvents()
         
     def update_browser_tab_audio_state(self, playing):
         browser_idx = -1

@@ -1,0 +1,3 @@
+Mp3 Meta Extract: 
+Allows user to export CSV/JSON of mp3 and wav and other audio files with metadata in the working audio folder.
+It also allows user to export album cover from mp3, by clicking on the mp3 and a window pops up showing the mp3 cover which can be dragged out into other apps for easy use.
