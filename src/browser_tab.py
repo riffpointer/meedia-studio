@@ -927,7 +927,7 @@ class BrowserTab(QWidget):
         from PySide6.QtWidgets import QGraphicsDropShadowEffect, QProgressBar, QFrame
         self.bg_progress_card = QFrame(self)
         self.bg_progress_card.setObjectName("bg_progress_card")
-        self.bg_progress_card.setFixedSize(280, 70)
+        self.bg_progress_card.setFixedSize(310, 70)
         self.bg_progress_card.setStyleSheet(f"""
             #bg_progress_card {{
                 background-color: {tc["dialog_bg"]};
@@ -982,8 +982,32 @@ class BrowserTab(QWidget):
         bg_details_layout.addWidget(self.bg_card_status)
         
         card_layout.addLayout(bg_details_layout)
-        
-        self.bg_progress_card.setGeometry(-1000, -1000, 280, 70)
+
+        self.bg_card_stop_btn = QPushButton("✕", self.bg_progress_card)
+        self.bg_card_stop_btn.setObjectName("bg_card_stop_btn")
+        self.bg_card_stop_btn.setFixedSize(24, 24)
+        self.bg_card_stop_btn.setCursor(Qt.PointingHandCursor)
+        self.bg_card_stop_btn.setToolTip("Stop download")
+        self.bg_card_stop_btn.setStyleSheet(f"""
+            QPushButton#bg_card_stop_btn {{
+                background-color: transparent;
+                color: {tc['text_muted']};
+                border: 1px solid {tc['border']};
+                border-radius: 4px;
+                font-size: 11px;
+                font-weight: bold;
+                padding: 0px;
+            }}
+            QPushButton#bg_card_stop_btn:hover {{
+                background-color: #c0392b;
+                color: #ffffff;
+                border-color: #c0392b;
+            }}
+        """)
+        self.bg_card_stop_btn.clicked.connect(self.on_bg_stop_clicked)
+        card_layout.addWidget(self.bg_card_stop_btn)
+
+        self.bg_progress_card.setGeometry(-1000, -1000, 310, 70)
         self._is_bg_card_visible = False
         
         self.bg_card_anim = QPropertyAnimation(self.bg_progress_card, b"geometry", self)
@@ -1870,25 +1894,115 @@ class BrowserTab(QWidget):
 
     def on_floating_ytdlp_clicked(self):
         url = self.url_bar.text().strip()
-        if hasattr(self.main_window, "ytdlp_tab") and url:
-            modifiers = QApplication.keyboardModifiers()
-            is_ytmusic = "music.youtube.com" in url
-            if (modifiers & Qt.ShiftModifier) and is_ytmusic:
-                self.main_window.ytdlp_tab.add_to_queue(url)
-                self.floating_ytdlp_btn.setText(" Added Music to Queue!")
-                self.floating_ytdlp_btn.setIcon(QIcon("res/icons/bootstrap-png/check-circle.png"))
-                tc = _tc()
-                self.animate_button(self.floating_ytdlp_btn, "floating_ytdlp_btn", tc["accent"], "#2e7d32", "#ffffff", "#ffffff")
-                
-                def reset_ytdlp_btn():
-                    self.floating_ytdlp_btn.setText(" Download with YTDLP")
-                    self.floating_ytdlp_btn.setIcon(QIcon("res/icons/bootstrap-png/download.png"))
-                    self.animate_button(self.floating_ytdlp_btn, "floating_ytdlp_btn", "#2e7d32", tc["accent"], "#ffffff", "#ffffff")
-                QTimer.singleShot(1500, reset_ytdlp_btn)
-            else:
-                self.main_window.tabs.setCurrentWidget(self.main_window.ytdlp_tab)
-                self.main_window.ytdlp_tab.url_input.setText(url)
-                self.main_window.ytdlp_tab.go_to_options(immediate=True)
+        if not (hasattr(self.main_window, "ytdlp_tab") and url):
+            return
+
+        modifiers = QApplication.keyboardModifiers()
+        is_ytmusic = "music.youtube.com" in url
+        if (modifiers & Qt.ShiftModifier) and is_ytmusic:
+            url = self.main_window.ytdlp_tab.remove_playlist_params(url)
+            self.main_window.ytdlp_tab.add_to_queue(url)
+            self.floating_ytdlp_btn.setText(" Added Music to Queue!")
+            self.floating_ytdlp_btn.setIcon(QIcon("res/icons/bootstrap-png/check-circle.png"))
+            tc = _tc()
+            self.animate_button(self.floating_ytdlp_btn, "floating_ytdlp_btn", tc["accent"], "#2e7d32", "#ffffff", "#ffffff")
+
+            def reset_ytdlp_btn():
+                self.floating_ytdlp_btn.setText(" Download with YTDLP")
+                self.floating_ytdlp_btn.setIcon(QIcon("res/icons/bootstrap-png/download.png"))
+                self.animate_button(self.floating_ytdlp_btn, "floating_ytdlp_btn", "#2e7d32", tc["accent"], "#ffffff", "#ffffff")
+            QTimer.singleShot(1500, reset_ytdlp_btn)
+            return
+
+        # Show Audio / Video picker dialog without switching tabs
+        tc = _tc()
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Download")
+        dlg.setModal(True)
+        dlg.setFixedWidth(300)
+        dlg.setAttribute(Qt.WA_DeleteOnClose)
+
+        root = QVBoxLayout(dlg)
+        root.setContentsMargins(16, 16, 16, 16)
+        root.setSpacing(8)
+
+        lbl = QLabel("Choose download type:")
+        lbl.setStyleSheet(f"color: {tc['text']}; font-size: 13px;")
+        root.addWidget(lbl)
+
+        btn_audio = QPushButton(QIcon("res/icons/bootstrap-png/music-note-beamed.png"), "  Download Audio")
+        btn_audio.setObjectName("dlg_btn_audio")
+        btn_audio.setMinimumHeight(36)
+        btn_audio.setCursor(Qt.PointingHandCursor)
+
+        btn_video = QPushButton(QIcon("res/icons/bootstrap-png/film.png"), "  Download Video")
+        btn_video.setObjectName("dlg_btn_video")
+        btn_video.setMinimumHeight(36)
+        btn_video.setCursor(Qt.PointingHandCursor)
+
+        btn_cancel = QPushButton("Cancel")
+        btn_cancel.setObjectName("dlg_btn_cancel")
+        btn_cancel.setMinimumHeight(32)
+        btn_cancel.setCursor(Qt.PointingHandCursor)
+
+        dlg.setStyleSheet(f"""
+            QDialog {{
+                background-color: {tc['bg']};
+                border: 1px solid {tc['border']};
+                border-radius: 8px;
+            }}
+            QPushButton#dlg_btn_audio, QPushButton#dlg_btn_video {{
+                background-color: {tc['accent']};
+                color: #ffffff;
+                border: none;
+                border-radius: 8px;
+                font-size: 13px;
+                padding: 4px 12px;
+            }}
+            QPushButton#dlg_btn_audio:hover, QPushButton#dlg_btn_video:hover {{
+                background-color: {tc['accent_hover']};
+            }}
+            QPushButton#dlg_btn_cancel {{
+                background-color: {tc['secondary_btn_bg']};
+                color: {tc['text']};
+                border: 1px solid {tc['border']};
+                border-radius: 8px;
+                font-size: 13px;
+                padding: 2px 12px;
+            }}
+            QPushButton#dlg_btn_cancel:hover {{
+                background-color: {tc['hover']};
+            }}
+        """)
+
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        row.addWidget(btn_audio)
+        row.addWidget(btn_video)
+        root.addLayout(row)
+
+        cancel_row = QHBoxLayout()
+        cancel_row.addStretch()
+        cancel_row.addWidget(btn_cancel)
+        root.addLayout(cancel_row)
+
+        ytdlp = self.main_window.ytdlp_tab
+
+        def _do_audio():
+            dlg.accept()
+            ytdlp.url_input.setText(url)
+            ytdlp.download_audio()
+
+        def _do_video():
+            dlg.accept()
+            ytdlp.url_input.setText(url)
+            ytdlp.download_video()
+
+        btn_audio.clicked.connect(_do_audio)
+        btn_video.clicked.connect(_do_video)
+        btn_cancel.clicked.connect(dlg.reject)
+
+        dlg.exec()
 
     def on_floating_queue_clicked(self):
         url = self.url_bar.text().strip()
@@ -2844,12 +2958,12 @@ class BrowserTab(QWidget):
                 self.bg_card_anim.stop()
                 
                 start_x = self.width() + 10
-                end_x = self.width() - 280 - 20
+                end_x = self.width() - 310 - 20
                 y_pos = self.nav_bar.height() + 10
                 
-                self.bg_progress_card.setGeometry(start_x, y_pos, 280, 70)
-                self.bg_card_anim.setStartValue(QRect(start_x, y_pos, 280, 70))
-                self.bg_card_anim.setEndValue(QRect(end_x, y_pos, 280, 70))
+                self.bg_progress_card.setGeometry(start_x, y_pos, 310, 70)
+                self.bg_card_anim.setStartValue(QRect(start_x, y_pos, 310, 70))
+                self.bg_card_anim.setEndValue(QRect(end_x, y_pos, 310, 70))
                 self.bg_card_anim.start()
         else:
             if self._is_bg_card_visible:
@@ -2885,8 +2999,23 @@ class BrowserTab(QWidget):
             end_x = self.width() + 10
             
             self.bg_card_anim.setStartValue(curr_rect)
-            self.bg_card_anim.setEndValue(QRect(end_x, curr_rect.y(), 280, 70))
+            self.bg_card_anim.setEndValue(QRect(end_x, curr_rect.y(), 310, 70))
             self.bg_card_anim.start()
+
+    def on_bg_stop_clicked(self):
+        from src.ytdlp_tab import YTDownloadProgressPanel
+        if not hasattr(self.main_window, "ytdlp_tab"):
+            return
+        ytdlp = self.main_window.ytdlp_tab
+        curr = ytdlp.stacked_widget.currentWidget()
+        if isinstance(curr, YTDownloadProgressPanel) and curr.worker.isRunning():
+            curr.worker.cancel()
+        # Immediately dismiss card without waiting for finish animation
+        if hasattr(self, "_finished_hide_timer") and self._finished_hide_timer:
+            self._finished_hide_timer.stop()
+            self._finished_hide_timer = None
+        self._bg_showing_finished = False
+        self._hide_bg_download_card()
 
 
 class SettingsWebEnginePage(QWebEnginePage):

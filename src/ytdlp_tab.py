@@ -296,6 +296,296 @@ class YTDownloadWorker(QThread):
 
 # YTDownloadErrorDialog was replaced by the shared DetailedErrorDialog class
 
+VIDEO_EXTENSIONS = {".mp4", ".mkv", ".webm", ".mov", ".avi", ".flv", ".ts", ".m4v"}
+
+class VideoThumbnailWorker(QThread):
+    """Extracts the first frame of a video file off the main thread."""
+    frame_ready = Signal(object)  # emits QPixmap
+
+    def __init__(self, file_path, parent=None):
+        super().__init__(parent)
+        self.file_path = file_path
+
+    def run(self):
+        from PySide6.QtGui import QPixmap, QImage
+        pixmap = QPixmap()
+        try:
+            import imageio_ffmpeg
+            import subprocess as _sp
+            ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+            si = _sp.STARTUPINFO()
+            si.dwFlags |= _sp.STARTF_USESHOWWINDOW
+            proc = _sp.Popen(
+                [ffmpeg, "-ss", "0", "-i", self.file_path,
+                 "-frames:v", "1", "-f", "image2", "-vcodec", "mjpeg", "-"],
+                stdout=_sp.PIPE, stderr=_sp.DEVNULL,
+                startupinfo=si
+            )
+            data, _ = proc.communicate(timeout=10)
+            if data:
+                img = QImage()
+                img.loadFromData(data)
+                if not img.isNull():
+                    pixmap = QPixmap.fromImage(img)
+        except Exception:
+            try:
+                import cv2
+                cap = cv2.VideoCapture(self.file_path)
+                if cap.isOpened():
+                    ret, frame = cap.read()
+                    if ret:
+                        from PIL import Image as _PILImage
+                        from src.utils import pil_to_qimage
+                        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                        q_img = pil_to_qimage(_PILImage.fromarray(frame_rgb))
+                        pixmap = QPixmap.fromImage(q_img)
+                    cap.release()
+            except Exception:
+                pass
+        self.frame_ready.emit(pixmap)
+
+
+class VideoDragCard(QWidget):
+    """Thumbnail card for a downloaded video. Shows first frame and supports native OS drag."""
+
+    VIDEO_EXTS = VIDEO_EXTENSIONS
+
+    def __init__(self, file_path, parent=None):
+        super().__init__(parent)
+        from PySide6.QtCore import QPoint
+        self.file_path = file_path
+        self._drag_start = QPoint()
+        self._pixmap = None
+
+        self.setFixedSize(220, 200)
+        self.setCursor(Qt.PointingHandCursor)
+
+        tc = _tc()
+        self.setStyleSheet(f"""
+            VideoDragCard {{
+                background-color: {tc['secondary_btn_bg']};
+                border: 1px solid {tc['border']};
+                border-radius: 8px;
+            }}
+        """)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(10, 10, 10, 10)
+        root.setSpacing(6)
+
+        # Thumbnail area
+        self.thumb = QLabel(self)
+        self.thumb.setFixedSize(200, 130)
+        self.thumb.setAlignment(Qt.AlignCenter)
+        self.thumb.setStyleSheet(f"""
+            background-color: #0c0c0c;
+            border-radius: 6px;
+            color: {tc['text_muted']};
+            font-size: 11px;
+        """)
+        self.thumb.setText("Loading preview…")
+        self.thumb.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        root.addWidget(self.thumb)
+
+        # File name
+        name = os.path.basename(file_path)
+        from PySide6.QtGui import QFontMetrics
+        fm = QFontMetrics(self.font())
+        name_lbl = QLabel(fm.elidedText(name, Qt.ElideRight, 198), self)
+        name_lbl.setAlignment(Qt.AlignCenter)
+        name_lbl.setStyleSheet(f"color: {tc['text']}; font-size: 11px; font-weight: bold;")
+        name_lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        root.addWidget(name_lbl)
+
+        # Drag hint
+        hint = QLabel("⠿  Drag to move file", self)
+        hint.setAlignment(Qt.AlignCenter)
+        hint.setStyleSheet(f"color: {tc['text_muted']}; font-size: 10px;")
+        hint.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        root.addWidget(hint)
+
+        root.addStretch()
+
+        self.setMouseTracking(True)
+
+        # Start frame extraction
+        self._worker = VideoThumbnailWorker(file_path, self)
+        self._worker.frame_ready.connect(self._on_frame_ready)
+        self._worker.start()
+
+    def _on_frame_ready(self, pixmap):
+        from PySide6.QtGui import QPixmap as _QP
+        if pixmap and not pixmap.isNull():
+            self._pixmap = pixmap
+            scaled = pixmap.scaled(200, 130, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            self.thumb.setPixmap(scaled)
+            self.thumb.setText("")
+        else:
+            tc = _tc()
+            self.thumb.setStyleSheet(
+                f"background-color: #0c0c0c; border-radius: 6px; color: {tc['text_muted']}; font-size: 11px;"
+            )
+            self.thumb.setText("No preview")
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._drag_start = event.pos()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if not (event.buttons() & Qt.LeftButton):
+            return
+        from PySide6.QtCore import QPoint
+        from PySide6.QtGui import QDrag
+        from PySide6.QtCore import QMimeData, QUrl
+        if (event.pos() - self._drag_start).manhattanLength() < QApplication.startDragDistance():
+            return
+        drag = QDrag(self)
+        mime = QMimeData()
+        mime.setUrls([QUrl.fromLocalFile(self.file_path)])
+        drag.setMimeData(mime)
+        if self._pixmap and not self._pixmap.isNull():
+            drag.setPixmap(self._pixmap.scaled(80, 60, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            from PySide6.QtCore import QPoint
+            drag.setHotSpot(QPoint(40, 30))
+        drag.exec(Qt.CopyAction | Qt.MoveAction)
+
+
+class Mp3ThumbnailWorker(QThread):
+    """Extracts embedded album art from an MP3 file off the main thread."""
+    frame_ready = Signal(object)  # emits QPixmap
+
+    def __init__(self, file_path, parent=None):
+        super().__init__(parent)
+        self.file_path = file_path
+
+    def run(self):
+        from PySide6.QtGui import QPixmap, QImage
+        pixmap = QPixmap()
+        try:
+            import imageio_ffmpeg
+            import subprocess as _sp
+            ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+            si = _sp.STARTUPINFO()
+            si.dwFlags |= _sp.STARTF_USESHOWWINDOW
+            proc = _sp.Popen(
+                [ffmpeg, "-i", self.file_path,
+                 "-map", "0:v:0", "-frames:v", "1",
+                 "-c:v", "copy", "-f", "image2pipe", "-"],
+                stdout=_sp.PIPE, stderr=_sp.DEVNULL,
+                startupinfo=si
+            )
+            data, _ = proc.communicate(timeout=8)
+            if data:
+                img = QImage()
+                img.loadFromData(data)
+                if not img.isNull():
+                    pixmap = QPixmap.fromImage(img)
+        except Exception:
+            pass
+        self.frame_ready.emit(pixmap)
+
+
+class AudioMiniCard(QWidget):
+    """Compact card showing MP3 album art (loaded async) + filename + size."""
+
+    def __init__(self, name, path, parent=None):
+        super().__init__(parent)
+        self.file_path = path
+        self._drag_start = None
+
+        tc = _tc()
+        self.setFixedSize(160, 190)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setStyleSheet(f"""
+            AudioMiniCard {{
+                background-color: {tc['secondary_btn_bg']};
+                border: 1px solid {tc['border']};
+                border-radius: 8px;
+            }}
+            AudioMiniCard:hover {{
+                border-color: {tc['accent']};
+            }}
+        """)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(8, 8, 8, 8)
+        root.setSpacing(6)
+
+        self.thumb = QLabel(self)
+        self.thumb.setFixedSize(144, 120)
+        self.thumb.setAlignment(Qt.AlignCenter)
+        self.thumb.setStyleSheet(
+            f"background-color: #0c0c0c; border-radius: 6px; color: {tc['text_muted']}; font-size: 10px;"
+        )
+        self.thumb.setPixmap(QIcon("res/icons/bootstrap-png/music-note-beamed.png").pixmap(32, 32))
+        self.thumb.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        root.addWidget(self.thumb)
+
+        from PySide6.QtGui import QFontMetrics
+        fm = QFontMetrics(self.font())
+        name_lbl = QLabel(fm.elidedText(name, Qt.ElideRight, 142), self)
+        name_lbl.setAlignment(Qt.AlignCenter)
+        name_lbl.setStyleSheet(
+            f"color: {tc['text']}; font-size: 10px; font-weight: bold; background: transparent;"
+        )
+        name_lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        root.addWidget(name_lbl)
+
+        try:
+            size_str = f"{os.path.getsize(path) / (1024 * 1024):.1f} MB"
+        except OSError:
+            size_str = ""
+        size_lbl = QLabel(size_str, self)
+        size_lbl.setAlignment(Qt.AlignCenter)
+        size_lbl.setStyleSheet(
+            f"color: {tc['text_muted']}; font-size: 10px; background: transparent;"
+        )
+        size_lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        root.addWidget(size_lbl)
+        root.addStretch()
+
+        self.setMouseTracking(True)
+
+        self._loaded = False
+        self._worker = Mp3ThumbnailWorker(path, self)
+        self._worker.frame_ready.connect(self._on_art_ready)
+        # Worker is NOT started here — trigger_load() is called lazily
+
+    def trigger_load(self):
+        """Start thumbnail extraction if not already started."""
+        if self._loaded:
+            return
+        self._loaded = True
+        self._worker.start()
+
+    def _on_art_ready(self, pixmap):
+        if pixmap and not pixmap.isNull():
+            scaled = pixmap.scaled(144, 120, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            self.thumb.setPixmap(scaled)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._drag_start = event.pos()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if not (event.buttons() & Qt.LeftButton) or self._drag_start is None:
+            return
+        if (event.pos() - self._drag_start).manhattanLength() < QApplication.startDragDistance():
+            return
+        from PySide6.QtGui import QDrag
+        from PySide6.QtCore import QMimeData, QUrl
+        drag = QDrag(self)
+        mime = QMimeData()
+        mime.setUrls([QUrl.fromLocalFile(self.file_path)])
+        drag.setMimeData(mime)
+        px = self.thumb.pixmap()
+        if px and not px.isNull():
+            drag.setPixmap(px.scaled(48, 48, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        drag.exec(Qt.CopyAction | Qt.MoveAction)
+
+
 class YTDownloadProgressPanel(QWidget):
     accepted = Signal(str)
     rejected = Signal(str)
@@ -1630,11 +1920,17 @@ class YTDLPTab(QWidget):
         left_layout.addWidget(label)
         
         file_path = self.parse_downloaded_filepath(output)
+        _, ext = os.path.splitext(file_path or "")
+        is_video_file = ext.lower() in VIDEO_EXTENSIONS
+
         if file_path and os.path.exists(file_path) and os.path.isfile(file_path):
-            from src.widgets import ImageCard
             card_layout = QHBoxLayout()
             card_layout.addStretch()
-            self.file_card = ImageCard(file_path, panel)
+            if is_video_file:
+                self.file_card = VideoDragCard(file_path, panel)
+            else:
+                from src.widgets import ImageCard
+                self.file_card = ImageCard(file_path, panel)
             card_layout.addWidget(self.file_card)
             card_layout.addStretch()
             left_layout.addLayout(card_layout)
@@ -1805,15 +2101,54 @@ class YTDLPTab(QWidget):
 
     def refresh_recent_downloads_table(self):
         scroll_width = self.recent_downloads_scroll.viewport().width()
-        if scroll_width <= 0: scroll_width = 800
-        self.populate_downloads_grid_into(self.recent_downloads_grid_layout, self.recent_downloads_grid_container, scroll_width)
+        if scroll_width <= 0:
+            scroll_width = 800
+        self._audio_mini_cards = []
+        self.populate_downloads_grid_into(
+            self.recent_downloads_grid_layout,
+            self.recent_downloads_grid_container,
+            scroll_width
+        )
+        # Wire scroll-based lazy loading once
+        if not getattr(self, "_scroll_lazy_connected", False):
+            self._scroll_lazy_connected = True
+            self.recent_downloads_scroll.verticalScrollBar().valueChanged.connect(
+                self._check_audio_cards_visibility
+            )
+            self.recent_downloads_scroll.horizontalScrollBar().valueChanged.connect(
+                self._check_audio_cards_visibility
+            )
+        # Initial check after layout is settled
+        QTimer.singleShot(150, self._check_audio_cards_visibility)
+
+    def _check_audio_cards_visibility(self):
+        """Trigger thumbnail load for every AudioMiniCard currently in the viewport."""
+        for card in getattr(self, "_audio_mini_cards", []):
+            if card is None or not card.isVisible():
+                continue
+            if not card.visibleRegion().isEmpty():
+                card.trigger_load()
+
+    def _get_mp3s_from_download_dir(self):
+        """Return list of (filename, 'MP3', full_path) for every .mp3 in the download dir, newest first."""
+        settings = self.main_window.settings
+        dl_dir = settings.get("ytdlp_download_dir", os.path.join(os.path.expanduser("~"), "Downloads"))
+        entries = []
+        try:
+            for fname in os.listdir(dl_dir):
+                if fname.lower().endswith(".mp3"):
+                    full = os.path.join(dl_dir, fname)
+                    if os.path.isfile(full):
+                        entries.append((fname, "MP3", full, os.path.getmtime(full)))
+        except OSError:
+            pass
+        entries.sort(key=lambda x: x[3], reverse=True)
+        return [(n, t, p) for n, t, p, _ in entries]
 
     def update_recent_downloads_visibility(self):
-        downloads = self.main_window.settings.get("ytdlp_recent_downloads", [])
         visible = self.main_window.settings.get("ytdlp_show_recent_downloads", True)
-        
-        # Only show if enabled in settings AND we have downloaded items in history
-        show_table = visible and (len(downloads) > 0)
+        has_items = len(self._get_mp3s_from_download_dir()) > 0
+        show_table = visible and has_items
         self.table_row_container.setVisible(show_table)
 
     def show_hide_downloads_menu(self, pos):
@@ -1909,44 +2244,50 @@ class YTDLPTab(QWidget):
             item = layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
-                
+
         settings = self.main_window.settings
-        downloads = settings.get("ytdlp_recent_downloads", [])
-        
-        # We need ImageCard
-        from src.widgets import ImageCard
-        from PySide6.QtWidgets import QMenu
-        
+
+        # For the flow-layout mini panel: scan mp3s from disk.
+        # For the full QGridLayout screen: use the saved log (mixed formats).
         is_grid = hasattr(layout, "columnCount")
         if is_grid:
+            downloads = settings.get("ytdlp_recent_downloads", [])
+            valid_downloads = [d for d in downloads if os.path.exists(d[2])]
             cols = max(1, (scroll_width - 16) // 156)
-            # Clear old column stretches
             for c in range(layout.columnCount()):
                 layout.setColumnStretch(c, 0)
-                
-            # Re-set stretches for current active columns
             for c in range(cols):
                 layout.setColumnStretch(c, 1)
-        
-        valid_downloads = [d for d in downloads if os.path.exists(d[2])]
+        else:
+            valid_downloads = self._get_mp3s_from_download_dir()
         total_items = len(valid_downloads)
-        
-        for idx, (name, ftype, path) in enumerate(valid_downloads):
-            card = ImageCard(path, container)
-            card.setContextMenuPolicy(Qt.CustomContextMenu)
-            card.customContextMenuRequested.connect(lambda pos, p=path, c=card: self.show_card_context_menu(pos, p, c))
-            
-            if total_items <= 1:
-                card.setMaximumWidth(180)
-            else:
-                card.setMaximumWidth(16777215)
-                
-            if is_grid:
+
+        if is_grid:
+            # Full grid screen — use rich ImageCard (opened on demand, not at startup)
+            from src.widgets import ImageCard
+            for idx, (name, ftype, path) in enumerate(valid_downloads):
+                card = ImageCard(path, container)
+                card.setContextMenuPolicy(Qt.CustomContextMenu)
+                card.customContextMenuRequested.connect(lambda pos, p=path, c=card: self.show_card_context_menu(pos, p, c))
+                if total_items <= 1:
+                    card.setMaximumWidth(180)
+                else:
+                    card.setMaximumWidth(16777215)
                 row = idx // cols
                 col = idx % cols
                 layout.addWidget(card, row, col)
-            else:
+        else:
+            # Mini flow-layout panel — AudioMiniCard with async album art
+            for idx, (name, ftype, path) in enumerate(valid_downloads):
+                card = AudioMiniCard(name, path, container)
+                card.setContextMenuPolicy(Qt.CustomContextMenu)
+                card.customContextMenuRequested.connect(
+                    lambda pos, p=path, c=card: self.show_card_context_menu(pos, p, c)
+                )
                 layout.addWidget(card)
+                if hasattr(self, "_audio_mini_cards"):
+                    self._audio_mini_cards.append(card)
+
 
     def refresh_downloads_grid(self):
         scroll_width = self.grid_scroll.viewport().width() or self.width() or 600
