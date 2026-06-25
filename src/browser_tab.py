@@ -711,16 +711,19 @@ class BrowserTab(QWidget):
 
         self.btn_back = QPushButton(self)
         self.btn_back.setIcon(QIcon("res/icons/bootstrap-png/arrow-left.png"))
+        self.btn_back.setToolTip("Back")
         self.btn_back.clicked.connect(self.on_back)
         nav_layout.addWidget(self.btn_back)
 
         self.btn_forward = QPushButton(self)
         self.btn_forward.setIcon(QIcon("res/icons/bootstrap-png/arrow-right.png"))
+        self.btn_forward.setToolTip("Forward")
         self.btn_forward.clicked.connect(self.on_forward)
         nav_layout.addWidget(self.btn_forward)
 
         self.btn_reload = QPushButton(self)
         self.btn_reload.setIcon(QIcon("res/icons/bootstrap-png/arrow-clockwise.png"))
+        self.btn_reload.setToolTip("Reload")
         self.btn_reload.clicked.connect(self.on_reload)
         nav_layout.addWidget(self.btn_reload)
 

@@ -36,17 +36,25 @@ def global_exception_handler(exctype, value, tb):
 
 sys.excepthook = global_exception_handler
 
+print("Import os")
 import os
+print("Import PySide6.QtWidgets")
 from PySide6.QtWidgets import QApplication
+print("Import PySide6.QtCore")
 from PySide6.QtCore import QTimer
+print("Import signal")
 import signal
 
+print("Import get_app_data_dir from src.utils")
 from src.utils import get_app_data_dir
 os.environ["U2NET_HOME"] = os.path.join(get_app_data_dir(), "models", "u2net")
 
+print("Import MainWindow from src.main_window")
 from src.main_window import MainWindow
 
+print("Import load_qss_template from src.utils")
 from PySide6.QtWidgets import QPushButton, QTabWidget
+print("Import Qt from PySide6.QtCore")
 from PySide6.QtCore import Qt
 
 _orig_btn_init = QPushButton.__init__
@@ -63,6 +71,7 @@ QTabWidget.__init__ = _new_tab_init
 
 
 if __name__ == "__main__":
+    print("Starting Meedia Studio... The app will be launched soon..!")
     dns_args = []
     try:
         import json

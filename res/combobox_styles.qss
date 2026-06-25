@@ -1,0 +1,58 @@
+/* Shared QComboBox styling template */
+QComboBox {{
+    border: 1px solid {border};
+    border-bottom: 2px solid rgba(255, 255, 255, 0.54);
+    border-radius: 6px;
+    padding: 5px 12px 5px 12px;
+    background-color: rgba(255, 255, 255, 0.06);
+    color: {text};
+    font-family: "Segoe UI", sans-serif;
+    font-size: 14px;
+    min-width: 150px;
+}}
+
+QComboBox:hover {{
+    background-color: rgba(255, 255, 255, 0.09);
+    border-bottom: 2px solid {accent};
+}}
+
+QComboBox:on {{
+    border-bottom: 2px solid {accent};
+    background-color: rgba(255, 255, 255, 0.06);
+}}
+
+QComboBox::drop-down {{
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 30px;
+    border-left-width: 0px;
+}}
+
+QComboBox::down-arrow {{
+    image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M2 4l4 4 4-4' fill='none' stroke='%23{text_hex}' stroke-width='1.2' stroke-linecap='round'/></svg>");
+}}
+
+QComboBox QAbstractItemView {{
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    background-color: #2C2C2C;
+    padding: 4px;
+    outline: 0px;
+}}
+
+QComboBox QAbstractItemView::item {{
+    padding: 4px 12px;
+    margin: 4px 0px;
+    border-radius: 6px;
+    color: {text};
+    background-color: transparent;
+}}
+
+QComboBox QAbstractItemView::item:hover {{
+    background-color: rgba(255, 255, 255, 0.08);
+}}
+
+QComboBox QAbstractItemView::item:selected {{
+    background-color: {accent};
+    color: #000000;
+}}

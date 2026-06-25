@@ -5,6 +5,7 @@ import json
 import urllib.request
 import shutil
 import subprocess
+import logging
 
 from PySide6.QtCore import Qt, QSize, QTimer, QEvent, QPoint, QUrl, QMimeData
 from PySide6.QtGui import QPixmap, QImage, QPainter, QBrush, QColor, QPalette, QClipboard, QKeySequence, QIcon
@@ -17,7 +18,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QShortcut
 
 from src.config import REMBG_AVAILABLE, MODEL_FILENAMES
-from src.utils import find_realesrgan_exe, get_app_data_dir
+from src.utils import find_realesrgan_exe, get_app_data_dir, load_qss_template
 from src.widgets import DragTabBar, ImageCard, DroppableScrollArea, ToastNotification
 from src.duplicate_cleaner_dialog import DuplicateCleanerDialog
 from src.workers import FileDownloadWorker, BGRemovalWorker, UpscaleWorker, VectorizerWorker, RestorationWorker, VideoConvertWorker
@@ -32,7 +33,6 @@ from src.dialogs import (
 from src.font_downloader_worker import DownloadWorker
 from src.font_downloader_dialogs import DownloadProgressDialog, FontInfoDialog, FormatHelpDialog
 from src.font_install_progress_dialog import FontInstallProgressDialog
-from src.myinstants_tab import MyInstantsTab
 from src.ytdlp_tab import YTDLPTab
 from src.browser_tab import BrowserTab
 
@@ -124,6 +124,7 @@ def get_theme_colors():
         "success_text":         "#22b573",
         "warning_text":         "#fbbf24",
         "error_color":          "#ef4444",
+        "accent_pressed":       system_accent_hover, # Fallback/derivative
     }
 
 class MainWindow(QMainWindow):
@@ -706,19 +707,6 @@ class MainWindow(QMainWindow):
         self.fonts_table_widget.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.fonts_table_widget.setShowGrid(False)
         self.fonts_table_widget.verticalHeader().setDefaultSectionSize(40)
-        self.fonts_table_widget.setStyleSheet("""
-            QTableWidget {
-                background-color: transparent;
-                border: 1px solid #374151;
-                border-radius: 8px;
-            }
-            QHeaderView::section {
-                background-color: transparent;
-                border: none;
-                padding: 6px;
-                font-weight: bold;
-            }
-        """)
         
         fonts_header = self.fonts_table_widget.horizontalHeader()
         fonts_header.setSectionResizeMode(0, QHeaderView.Stretch)
@@ -792,9 +780,15 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.fonts_tab, QIcon("res/icons/bootstrap-png/fonts.png"), "Google Fonts")
         
         self.update_splash("Loading Soundboard API connectors...")
-        # 6. MyInstants Tab Widget
-        self.myinstants_tab = MyInstantsTab(self)
-        self.tabs.addTab(self.myinstants_tab, QIcon("res/icons/bootstrap-png/boombox.png"), "Soundboard")
+        # 6. MyInstants Tab Widget (Lazy loaded)
+        self.myinstants_tab_placeholder = QWidget()
+        myinstants_ph_layout = QVBoxLayout(self.myinstants_tab_placeholder)
+        myinstants_ph_label = QLabel("Loading Soundboard... Please wait.")
+        myinstants_ph_label.setAlignment(Qt.AlignCenter)
+        myinstants_ph_label.setStyleSheet("font-size: 16px; font-weight: bold; color: gray;")
+        myinstants_ph_layout.addWidget(myinstants_ph_label)
+        self.myinstants_tab = None
+        self.tabs.addTab(self.myinstants_tab_placeholder, QIcon("res/icons/bootstrap-png/boombox.png"), "Soundboard")
 
         self.update_splash("Loading YTDLP media download workers...")
         # 7. YTDLP Tab Widget
@@ -806,6 +800,16 @@ class MainWindow(QMainWindow):
         # 8. Browser Tab Widget
         self.browser_tab = BrowserTab(self)
         self.tabs.addTab(self.browser_tab, QIcon("res/icons/bootstrap-png/globe.png"), "Browser")
+
+        # 9. TTS Tab Widget (Lazy loaded)
+        self.tts_tab_placeholder = QWidget()
+        tts_ph_layout = QVBoxLayout(self.tts_tab_placeholder)
+        tts_ph_label = QLabel("Loading TTS... Please wait.")
+        tts_ph_label.setAlignment(Qt.AlignCenter)
+        tts_ph_label.setStyleSheet("font-size: 16px; font-weight: bold; color: gray;")
+        tts_ph_layout.addWidget(tts_ph_label)
+        self.tts_tab = None
+        self.tabs.addTab(self.tts_tab_placeholder, QIcon("res/icons/bootstrap-png/mic.png"), "TTS")
 
         
         # Setup Font Downloader state
@@ -900,8 +904,10 @@ class MainWindow(QMainWindow):
                     self.current_dirs.append(browser_img_pool)
             
         self.load_directories(self.current_dirs)
+        print("App initialized")
         
     def update_splash(self, message):
+        print(f"Loading: {message}")
         if hasattr(self, 'splash') and self.splash:
             from PySide6.QtGui import QPainter, QFont, QColor
             from PySide6.QtCore import Qt
@@ -1119,6 +1125,7 @@ class MainWindow(QMainWindow):
                 print(f"Error restoring geometry: {e}")
                 
     def save_app_settings(self):
+        print(f"Config changes saved to: {self.settings_path}")
         try:
             with open(self.settings_path, 'w') as f:
                 json.dump(self.settings, f, indent=4)
@@ -1411,6 +1418,38 @@ class MainWindow(QMainWindow):
                 border-radius: 5px;
             }}
             
+            QDialog QTabWidget::pane {{
+                border: 1px solid {border};
+                background-color: transparent;
+                border-top-left-radius: 0px;
+                border-top-right-radius: 8px;
+                border-bottom-left-radius: 8px;
+                border-bottom-right-radius: 8px;
+            }}
+            QDialog QTabBar::tab {{
+                background-color: {scrollbar_bg};
+                color: {text_muted};
+                border: 1px solid {border};
+                border-bottom: none;
+                border-top-left-radius: 6px;
+                border-top-right-radius: 6px;
+                border-bottom-left-radius: 0px;
+                border-bottom-right-radius: 0px;
+                padding: 6px 12px;
+                font-weight: bold;
+                font-size: 12px;
+                text-align: center;
+            }}
+            QDialog QTabBar::tab:selected {{
+                background-color: {accent};
+                color: #ffffff;
+                border-color: {accent};
+            }}
+            QDialog QTabBar::tab:hover:!selected {{
+                background-color: {card_hover_bg};
+                color: {text_bright};
+            }}
+            
             QTabWidget::pane {{
                 border: 1px solid {border};
                 background-color: transparent;
@@ -1440,14 +1479,6 @@ class MainWindow(QMainWindow):
                 background-color: {card_hover_bg};
                 color: {text_bright};
             }}
-            QComboBox {{
-                background-color: {input_bg};
-                border: 1px solid {border};
-                border-radius: 4px;
-                padding: 6px 12px;
-                color: {text};
-            }}
-            QComboBox::drop-down {{ border: none; }}
             QSlider::groove:horizontal {{
                 border: 1px solid {border};
                 height: 6px;
@@ -1483,12 +1514,57 @@ class MainWindow(QMainWindow):
                 color: {text_bright};
             }}
             
+            QTableWidget {{
+                background-color: transparent;
+                alternate-background-color: {card_hover_bg};
+                gridline-color: {border};
+                border: 1px solid {border};
+                border-radius: 8px;
+                color: {text};
+            }}
+            QTableWidget::item {{
+                padding: 4px;
+                border-bottom: 1px solid {border};
+            }}
+            QTableWidget::item:selected {{
+                background-color: {accent};
+                color: #ffffff;
+            }}
+            QHeaderView {{
+                background-color: transparent;
+                border: none;
+            }}
+            QHeaderView::section {{
+                background-color: {secondary_btn_bg};
+                color: {text};
+                border: none;
+                border-bottom: 2px solid {border};
+                padding: 6px;
+                font-weight: bold;
+            }}
+            
+            SoundItemWidget {{
+                border-radius: 6px;
+                background-color: transparent;
+            }}
+            SoundItemWidget[even="true"] {{
+                background-color: {card_hover_bg};
+            }}
+            SoundItemWidget QLabel {{
+                color: {text};
+            }}
+            #soundboardScrollArea {{
+                border: 1px solid {border};
+                border-radius: 8px;
+                background-color: transparent;
+            }}
+
             #ImageCard {{
                 background-color: {card_bg};
                 border: 2px solid {border};
                 border-radius: 10px;
             }}
-            #ImageCard:hover {{
+            #ImageCard:hover, #ImageCard:focus {{
                 background-color: {card_hover_bg};
                 border: 2px solid {accent};
             }}
@@ -2706,6 +2782,8 @@ class MainWindow(QMainWindow):
         self.start_batch_removal_worker(file_path, current_num)
         
     def start_batch_removal_worker(self, file_path, current_num):
+        if getattr(self, 'worker', None) and self.worker.isRunning():
+            self.worker.wait()
         model_name = self.settings.get("model_name", "u2net")
         self.loading_dlg.start_inference_mode()
         
@@ -2732,13 +2810,17 @@ class MainWindow(QMainWindow):
                 'pil_img': result_pil_image
             })
         else:
-            print(f"Error processing {file_path}: {error_message}")
+            logging.error(f"Error processing {file_path}: {error_message}")
             self.set_status(f"Failed to process: {os.path.basename(file_path)}")
+            if hasattr(self, 'loading_dlg') and self.loading_dlg.isVisible():
+                self.loading_dlg.close()
             DetailedErrorDialog.show_error(self, "Processing Error", f"Error processing {os.path.basename(file_path)}", error_message)
             
         self.process_next_batch_item()
         
     def start_batch_vectorizer_worker(self, file_path, current_num):
+        if getattr(self, 'worker', None) and self.worker.isRunning():
+            self.worker.wait()
         self.loading_dlg.start_inference_mode()
         self.loading_dlg.title_label.setText(f"Vectorizing Image {current_num} of {self.batch_total}")
         self.loading_dlg.info.setText(f"Tracing vector paths for \"{os.path.basename(file_path)}\"...")
@@ -2769,8 +2851,10 @@ class MainWindow(QMainWindow):
                 'svg_content': result_svg_content
             })
         else:
-            print(f"Error vectorizing {file_path}: {error_message}")
+            logging.error(f"Error vectorizing {file_path}: {error_message}")
             self.set_status(f"Failed to vectorize: {os.path.basename(file_path)}")
+            if hasattr(self, 'loading_dlg') and self.loading_dlg.isVisible():
+                self.loading_dlg.close()
             DetailedErrorDialog.show_error(self, "Vectorizer Error", f"Error vectorizing {os.path.basename(file_path)}", error_message)
             
         self.process_next_batch_item()
@@ -2790,7 +2874,7 @@ class MainWindow(QMainWindow):
                     f.write(svg_content)
                 success_count += 1
             except Exception as e:
-                print(f"Error saving batch vector {save_path}: {e}")
+                logging.error(f"Error saving batch vector {save_path}: {e}")
                 
         self.set_status(f"Batch vectorizer completed: successfully saved {success_count} SVGs to {os.path.basename(out_dir)}")
         self.load_directories(self.current_dirs)
@@ -2809,6 +2893,8 @@ class MainWindow(QMainWindow):
         self.start_batch_upscale_worker(file_path, current_num)
         
     def start_batch_upscale_worker(self, file_path, current_num):
+        if getattr(self, 'worker', None) and self.worker.isRunning():
+            self.worker.wait()
         model_name = self.upscale_model
         scale = self.upscale_scale
         
@@ -2836,8 +2922,10 @@ class MainWindow(QMainWindow):
                 'pil_img': result_pil_image
             })
         else:
-            print(f"Error upscaling {file_path}: {error_message}")
+            logging.error(f"Error upscaling {file_path}: {error_message}")
             self.set_status(f"Failed to upscale: {os.path.basename(file_path)}")
+            if hasattr(self, 'loading_dlg') and self.loading_dlg.isVisible():
+                self.loading_dlg.close()
             DetailedErrorDialog.show_error(self, "Upscale Error", f"Error upscaling {os.path.basename(file_path)}", error_message)
             
         self.process_next_batch_item()
@@ -2856,6 +2944,8 @@ class MainWindow(QMainWindow):
         self.start_batch_restoration_worker(file_path, current_num)
         
     def start_batch_restoration_worker(self, file_path, current_num):
+        if getattr(self, 'worker', None) and self.worker.isRunning():
+            self.worker.wait()
         self.loading_dlg.start_inference_mode()
         self.loading_dlg.title_label.setText(f"Restoring Image {current_num} of {self.batch_total}")
         method = self.restoration_params.get("method", "nlmeans").upper()
@@ -2881,8 +2971,10 @@ class MainWindow(QMainWindow):
                 'pil_img': result_pil_image
             })
         else:
-            print(f"Error restoring {file_path}: {error_message}")
+            logging.error(f"Error restoring {file_path}: {error_message}")
             self.set_status(f"Failed to restore: {os.path.basename(file_path)}")
+            if hasattr(self, 'loading_dlg') and self.loading_dlg.isVisible():
+                self.loading_dlg.close()
             DetailedErrorDialog.show_error(self, "Restoration Error", f"Error restoring {os.path.basename(file_path)}", error_message)
             
         self.process_next_batch_item()
@@ -2946,7 +3038,7 @@ class MainWindow(QMainWindow):
                         try:
                             os.remove(file_path)
                         except OSError as e:
-                            print(f"Error removing original file: {e}")
+                            logging.error(f"Error removing original file: {e}")
                         self.set_status(f"Replaced image with PNG: {os.path.basename(new_path)}")
                 else:
                     save_fmt = 'PNG' if ext == '.png' else ('JPEG' if ext in ['.jpg', '.jpeg'] else 'PNG')
@@ -2967,6 +3059,34 @@ class MainWindow(QMainWindow):
         self.settings["last_active_tab"] = idx
         self.save_app_settings()
         
+        # Lazy load Soundboard (index 5)
+        if idx == 5 and self.myinstants_tab is None:
+            self.set_status("Loading Soundboard... Please wait.")
+            QApplication.setOverrideCursor(Qt.WaitCursor)
+            QApplication.processEvents()
+            try:
+                from src.myinstants_tab import MyInstantsTab
+                self.myinstants_tab = MyInstantsTab(self)
+                self.tabs.removeTab(5)
+                self.tabs.insertTab(5, self.myinstants_tab, QIcon("res/icons/bootstrap-png/boombox.png"), "Soundboard")
+                self.tabs.setCurrentIndex(5)
+            finally:
+                QApplication.restoreOverrideCursor()
+                
+        # Lazy load TTS (index 8)
+        if idx == 8 and self.tts_tab is None:
+            self.set_status("Loading TTS... Please wait.")
+            QApplication.setOverrideCursor(Qt.WaitCursor)
+            QApplication.processEvents()
+            try:
+                from src.tts_tab import TTSTab
+                self.tts_tab = TTSTab()
+                self.tabs.removeTab(8)
+                self.tabs.insertTab(8, self.tts_tab, QIcon("res/icons/bootstrap-png/mic.png"), "TTS")
+                self.tabs.setCurrentIndex(8)
+            finally:
+                QApplication.restoreOverrideCursor()
+
         current_widget = self.tabs.currentWidget()
         if hasattr(self, "btn_my_downloads"):
             # Set connection if not already connected
@@ -2985,24 +3105,16 @@ class MainWindow(QMainWindow):
             self.ytdlp_tab.focus_url_input()
         elif current_widget == getattr(self, "browser_tab", None):
             self.set_status("Browser active.")
+        elif current_widget == getattr(self, "myinstants_tab", None):
+            self.set_status("Soundboard active.")
+        elif current_widget == getattr(self, "tts_tab", None):
+            self.set_status("Text-To-Speech active.")
         else:
             self.populate_grid()
 
     def fetch_fonts_catalog(self):
         self.fonts_stacked_widget.setCurrentWidget(self.fonts_loading_widget)
-        class CatalogLoader(QThread):
-            loaded = Signal(list, bool)
-            def run(self):
-                try:
-                    url = "https://gwfh.mranftl.com/api/fonts"
-                    response = requests.get(url, timeout=12)
-                    if response.status_code == 200:
-                        self.loaded.emit(response.json(), True)
-                    else:
-                        self.loaded.emit([], False)
-                except Exception:
-                    self.loaded.emit([], False)
-        
+        from src.workers import CatalogLoader
         self.fonts_loader = CatalogLoader(self)
         self.fonts_loader.loaded.connect(self.on_fonts_catalog_loaded)
         self.fonts_loader.start()

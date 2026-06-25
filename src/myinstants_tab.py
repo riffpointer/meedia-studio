@@ -33,6 +33,7 @@ class SoundItemWidget(QFrame):
         self.btn_play.setIcon(QIcon("res/icons/bootstrap-png/play-fill.png"))
         self.btn_play.setToolTip("Play")
         self.btn_play.setFixedSize(32, 28)
+        self.btn_play.setObjectName("secondaryButton")
         self.btn_play.setFocusPolicy(Qt.NoFocus)
         self.btn_play.clicked.connect(lambda: self.play_requested.emit(self.item))
 
@@ -60,6 +61,7 @@ class SoundItemWidget(QFrame):
         
         self.btn_download = QPushButton(" Saved" if is_downloaded else " Download")
         self.btn_download.setIcon(QIcon("res/icons/bootstrap-png/check-circle.png" if is_downloaded else "res/icons/bootstrap-png/download.png"))
+        self.btn_download.setObjectName("secondaryButton")
         self.btn_download.setFocusPolicy(Qt.NoFocus)
         self.btn_download.clicked.connect(lambda: self.download_requested.emit(self.item))
         if is_downloaded:
@@ -70,8 +72,9 @@ class SoundItemWidget(QFrame):
         layout.addWidget(self.btn_download)
 
     def update_style(self):
-        bg_color = "rgba(0, 0, 0, 0.03)" if self.is_even else "transparent"
-        self.setStyleSheet(f"SoundItemWidget {{ background-color: {bg_color}; border-radius: 6px; }}")
+        self.setProperty("even", self.is_even)
+        self.style().unpolish(self)
+        self.style().polish(self)
 
     def set_playing(self, playing: bool):
         self.btn_play.setIcon(QIcon("res/icons/bootstrap-png/stop-fill.png" if playing else "res/icons/bootstrap-png/play-fill.png"))
@@ -129,11 +132,13 @@ class MyInstantsTab(QWidget):
         
         self.btn_search = QPushButton(" Search")
         self.btn_search.setIcon(QIcon("res/icons/bootstrap-png/search.png"))
+        self.btn_search.setObjectName("secondaryButton")
         self.btn_search.clicked.connect(self.search)
         filter_layout.addWidget(self.btn_search)
         
         self.btn_prev = QPushButton(" Prev")
         self.btn_prev.setIcon(QIcon("res/icons/bootstrap-png/chevron-left.png"))
+        self.btn_prev.setObjectName("secondaryButton")
         self.btn_prev.clicked.connect(self.prev_page)
         filter_layout.addWidget(self.btn_prev)
         
@@ -142,6 +147,7 @@ class MyInstantsTab(QWidget):
         
         self.btn_next = QPushButton("Next ")
         self.btn_next.setIcon(QIcon("res/icons/bootstrap-png/chevron-right.png"))
+        self.btn_next.setObjectName("secondaryButton")
         self.btn_next.clicked.connect(self.next_page)
         filter_layout.addWidget(self.btn_next)
         
@@ -151,8 +157,8 @@ class MyInstantsTab(QWidget):
         self.stacked_widget = QStackedWidget()
         
         self.scroll_area = QScrollArea()
+        self.scroll_area.setObjectName("soundboardScrollArea")
         self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setStyleSheet("QScrollArea {{ background-color: transparent; border: 1px solid {scrollbar_handle}; border-radius: 8px; }}".format(**_tc()))
         self.list_container = QWidget()
         self.list_layout = QVBoxLayout(self.list_container)
         self.list_layout.setAlignment(Qt.AlignTop)

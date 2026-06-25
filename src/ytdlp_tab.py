@@ -461,17 +461,38 @@ class Mp3ThumbnailWorker(QThread):
 
     def run(self):
         from PySide6.QtGui import QPixmap, QImage
+        import subprocess as _sp
+        import shutil
         pixmap = QPixmap()
         try:
-            import imageio_ffmpeg
-            import subprocess as _sp
-            ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+            ffmpeg = None
+            try:
+                import imageio_ffmpeg
+                ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+            except ImportError:
+                pass
+            
+            if not ffmpeg:
+                ffmpeg = shutil.which("ffmpeg")
+                
+            if not ffmpeg:
+                from src.utils import get_app_data_dir
+                suffix = ".exe" if sys.platform == "win32" else ""
+                local_path = os.path.join(get_app_data_dir(), "bin", f"ffmpeg{suffix}")
+                if os.path.exists(local_path):
+                    ffmpeg = local_path
+                    
+            if not ffmpeg:
+                self.frame_ready.emit(pixmap)
+                return
+                
             si = _sp.STARTUPINFO()
-            si.dwFlags |= _sp.STARTF_USESHOWWINDOW
+            if sys.platform == "win32":
+                si.dwFlags |= _sp.STARTF_USESHOWWINDOW
             proc = _sp.Popen(
                 [ffmpeg, "-i", self.file_path,
                  "-map", "0:v:0", "-frames:v", "1",
-                 "-c:v", "copy", "-f", "image2pipe", "-"],
+                 "-c:v", "mjpeg", "-f", "image2pipe", "-"],
                 stdout=_sp.PIPE, stderr=_sp.DEVNULL,
                 startupinfo=si
             )

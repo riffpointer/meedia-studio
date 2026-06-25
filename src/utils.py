@@ -15,6 +15,16 @@ def get_app_data_dir():
         base_dir = os.environ.get("XDG_DATA_HOME", os.path.join(os.path.expanduser("~"), ".local", "share"))
         return os.path.join(base_dir, app_author, app_name)
 
+
+def load_qss_template(filename, **tokens):
+    """Load a QSS file and format it with theme tokens."""
+    qss_path = os.path.join(os.path.dirname(__file__), "..", "res", filename)
+    try:
+        with open(qss_path, "r", encoding="utf-8") as qss_file:
+            return qss_file.read().format(**tokens)
+    except Exception:
+        return ""
+
 # Helper function to find Real-ESRGAN executable recursively in a directory
 def find_realesrgan_exe(dir_path):
     if not os.path.exists(dir_path):

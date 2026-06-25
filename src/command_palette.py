@@ -22,7 +22,7 @@ class CommandPaletteDialog(QDialog):
             QDialog {{
                 background-color: {tc["dialog_bg"]};
                 border: none;
-                border-radius: 0px;
+                border-radius: 0px; /* Intentional 0px border-radius for VS Code-style flat layout */
             }}
             QLineEdit {{
                 background-color: {tc["input_bg"]};
@@ -243,19 +243,37 @@ class CommandPaletteDialog(QDialog):
             
     def filter_items(self, query):
         query = query.lower().strip()
-        if not query:
-            self.populate_list(self.commands)
-            return
-            
-        filtered = []
-        for cmd in self.commands:
-            match_str = f"{cmd['title']} {cmd.get('subtitle', '')} {cmd['category']}".lower()
-            if query in match_str:
-                filtered.append(cmd)
-        self.populate_list(filtered)
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            cmd = item.data(Qt.UserRole)
+            if not cmd:
+                continue
+            if not query:
+                item.setHidden(False)
+            else:
+                match_str = f"{cmd['title']} {cmd.get('subtitle', '')} {cmd['category']}".lower()
+                item.setHidden(query not in match_str)
+                
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            if not item.isHidden():
+                self.list_widget.setCurrentItem(item)
+                break
         
     def on_item_activated(self, item):
         cmd = item.data(Qt.UserRole)
         if cmd and "action" in cmd:
             self.accept()
             cmd["action"]()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            pos = event.globalPosition().toPoint() if hasattr(event, 'globalPosition') else event.globalPos()
+            self._drag_position = pos - self.frameGeometry().topLeft()
+            event.accept()
+            
+    def mouseMoveEvent(self, event):
+        if event.buttons() == Qt.LeftButton:
+            pos = event.globalPosition().toPoint() if hasattr(event, 'globalPosition') else event.globalPos()
+            self.move(pos - self._drag_position)
+            event.accept()

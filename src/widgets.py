@@ -1,7 +1,7 @@
 import os
 from PySide6.QtCore import (
     Qt, QSize, Signal, QPoint, QUrl, QMimeData, QByteArray, QEvent,
-    QTimer, QPropertyAnimation, QEasingCurve, QRectF
+    QTimer, QPropertyAnimation, QEasingCurve, QRectF, QRect
 )
 from PySide6.QtGui import (
     QPixmap, QPainter, QBrush, QColor, QDrag, QClipboard,
@@ -458,17 +458,6 @@ class TransparentImageLabel(QLabel):
         self.base_pixmap = None
         self.setFixedSize(400, 360)  # Initial base size matching comparison view scrollports
         
-        # Create a subtle dark-mode checkerboard pattern brush
-        size = 10
-        pixmap = QPixmap(size * 2, size * 2)
-        pixmap.fill(QColor(30, 30, 36))  # Dark color
-        painter = QPainter(pixmap)
-        # Paint lighter tiles
-        painter.fillRect(0, 0, size, size, QColor(42, 42, 50))
-        painter.fillRect(size, size, size, size, QColor(42, 42, 50))
-        painter.end()
-        self.checkerboard_brush = QBrush(pixmap)
-        
     def set_image(self, pixmap):
         self.base_pixmap = pixmap
         self.update_size()
@@ -487,10 +476,8 @@ class TransparentImageLabel(QLabel):
         
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setBrushOrigin(-self.pos())
-        painter.fillRect(self.rect(), self.checkerboard_brush)
         
-        # 2. Paint the centered, aspect-ratio preserved pixmap
+        # Paint the centered, aspect-ratio preserved pixmap
         if self.base_pixmap and not self.base_pixmap.isNull():
             scaled_pix = self.base_pixmap.scaled(self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
             x = (self.width() - scaled_pix.width()) // 2
@@ -506,17 +493,6 @@ class TransparentSvgLabel(QWidget):
         self.zoom_factor = 1.0
         self.base_size = QSize(400, 360)
         self.setFixedSize(self.base_size)
-        
-        # Create subtle dark-mode checkerboard pattern brush
-        size = 10
-        pixmap = QPixmap(size * 2, size * 2)
-        pixmap.fill(QColor(30, 30, 36))  # Dark color
-        painter = QPainter(pixmap)
-        # Paint lighter tiles
-        painter.fillRect(0, 0, size, size, QColor(42, 42, 50))
-        painter.fillRect(size, size, size, size, QColor(42, 42, 50))
-        painter.end()
-        self.checkerboard_brush = QBrush(pixmap)
         
     def set_svg_data(self, svg_data):
         self.renderer.load(QByteArray(svg_data.encode('utf-8')))
@@ -535,7 +511,6 @@ class TransparentSvgLabel(QWidget):
             
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.fillRect(self.rect(), self.checkerboard_brush)
         if self.renderer.isValid():
             self.renderer.render(painter, self.rect())
         painter.end()
@@ -789,18 +764,14 @@ class ImageCard(QFrame):
         self.setObjectName("ImageCard")
         self.setMinimumWidth(160)
         self.setFixedHeight(210)
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.setToolTip(f"Image: {os.path.basename(file_path)}")
         self.drag_start_position = QPoint()
         
         from PySide6.QtWidgets import QGraphicsDropShadowEffect
         from PySide6.QtGui import QColor
         from PySide6.QtCore import QVariantAnimation
         
-        self.shadow = QGraphicsDropShadowEffect(self)
-        self.shadow.setBlurRadius(8)
-        self.shadow.setXOffset(0)
-        self.shadow.setYOffset(2)
-        self.shadow.setColor(QColor(0, 0, 0, 80))
-        self.setGraphicsEffect(self.shadow)
         
         self.hover_anim = QVariantAnimation(self)
         self.hover_anim.setDuration(200)
@@ -854,8 +825,9 @@ class ImageCard(QFrame):
             scaled_pixmap = pixmap.scaled(140, 110, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             self.img_label.setPixmap(scaled_pixmap)
         else:
+            from src.dialogs import _tc
             self.img_label.setText("Failed to Load")
-            self.img_label.setStyleSheet("color: #ef4444; background-color: transparent; border-radius: 6px;")
+            self.img_label.setStyleSheet(f"color: {_tc()['error_color']}; background-color: transparent; border-radius: 6px;")
             
         layout.addWidget(self.img_label)
         
@@ -890,6 +862,7 @@ class ImageCard(QFrame):
         
         self.checkbox = QCheckBox(self)
         self.checkbox.setObjectName("cardCheckbox")
+        self.checkbox.setToolTip("Select file for batch operations")
         self.checkbox.move(8, 8)
         self.checkbox.stateChanged.connect(self.on_checkbox_changed)
 
@@ -952,6 +925,8 @@ class ImageCard(QFrame):
 
     def showEvent(self, event):
         super().showEvent(event)
+        alpha = self.get_shadow_alpha()
+        self.shadow.setColor(QColor(0, 0, 0, alpha))
         
     def on_checkbox_changed(self, state):
         self.selection_changed.emit(state == Qt.Checked)
@@ -1008,202 +983,15 @@ class ImageCard(QFrame):
                     self.clicked.emit(self.file_path)
         super().mouseReleaseEvent(event)
         
-    def mouseMoveEvent(self, event):
-        if not (event.buttons() & Qt.LeftButton):
-            return
-        # Check drag distance threshold to prevent accidental drags on quick clicks
-        if (event.pos() - self.drag_start_position).manhattanLength() < QApplication.startDragDistance():
-            return
-            
-        drag = QDrag(self)
-        mime_data = QMimeData()
-        mime_data.setUrls([QUrl.fromLocalFile(self.file_path)])
-        drag.setMimeData(mime_data)
-        
-        pixmap = self.img_label.pixmap()
-        if pixmap and not pixmap.isNull():
-            drag.setPixmap(pixmap.scaled(70, 70, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-            drag.setHotSpot(QPoint(35, 35))
-            
-        drag.exec(Qt.CopyAction)
-        
-    def show_context_menu(self, position):
-        from src.dialogs import _tc
-        menu = QMenu(self)
-        tc = _tc()
-        menu.setStyleSheet("""
-            QMenu {
-                background-color: %s;
-                color: %s;
-                border: 1px solid %s;
-                border-radius: 6px;
-                padding: 4px;
-            }
-            QMenu::item {
-                padding: 6px 20px;
-                border-radius: 4px;
-            }
-            QMenu::item:selected {
-                background-color: %s;
-                color: #ffffff;
-            }
-            QMenu::separator {
-                height: 1px;
-                background-color: %s;
-                margin: 4px 0px;
-            }
-        """ % (tc["menu_bg"], tc["text"], tc["border"], tc["accent"], tc["border"]))
-        
-        act_rename = menu.addAction("Rename")
-        act_copy = menu.addAction("Copy")
-        act_paste = menu.addAction("Paste")
-        
-        # Enable Paste only if clipboard has files
-        clipboard = QApplication.clipboard()
-        mime_data = clipboard.mimeData()
-        if not mime_data.hasUrls():
-            act_paste.setEnabled(False)
-            
-        act_delete = menu.addAction("Delete")
-        menu.addSeparator()
-        act_explorer = menu.addAction("Show in Explorer")
-        
-        action = menu.exec(self.mapToGlobal(position))
-        
-        main_win = self.window()
-        if not hasattr(main_win, 'rename_file'):
-            return
-            
-        if action == act_rename:
-            main_win.rename_file(self.file_path)
-        elif action == act_copy:
-            main_win.copy_file(self.file_path)
-        elif action == act_paste:
-            main_win.paste_file()
-        elif action == act_delete:
-            main_win.delete_file(self.file_path)
-        elif action == act_explorer:
-            main_win.show_in_explorer(self.file_path)
-
-
-# Interactive Region Selection label for Denoise/Deblur
-from PySide6.QtGui import QPen, QColor, QBrush
-from PySide6.QtCore import QRect
-
-class RegionSelectLabel(QLabel):
-    region_selected = Signal(QRect) # Emits the raw pixel QRect of the original image
-    
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setAlignment(Qt.AlignCenter)
-        self.setMouseTracking(True)
-        self.start_pos = None
-        self.current_pos = None
-        self.selection_rect = None # QRect in label coordinates
-        self.base_pixmap = None
-        
-    def set_image(self, pixmap):
-        self.base_pixmap = pixmap
-        self.selection_rect = None
-        self.update()
-        
-    def paintEvent(self, event):
-        super().paintEvent(event)
-        if not self.base_pixmap or self.base_pixmap.isNull():
-            return
-            
-        # Draw selection rectangle if exists
-        if self.selection_rect and self.selection_rect.isValid():
-            painter = QPainter(self)
-            pen = QPen(QColor(99, 102, 241), 2, Qt.DashLine)
-            painter.setPen(pen)
-            painter.setBrush(QBrush(QColor(99, 102, 241, 40)))
-            painter.drawRect(self.selection_rect)
-            painter.end()
-            
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self.start_pos = event.pos()
-            self.current_pos = event.pos()
-            self.selection_rect = QRect(self.start_pos, self.current_pos)
-            self.update()
-            
-    def mouseMoveEvent(self, event):
-        if event.buttons() & Qt.LeftButton and self.start_pos:
-            self.current_pos = event.pos()
-            self.selection_rect = QRect(self.start_pos, self.current_pos).normalized()
-            self.update()
-            
-    def mouseReleaseEvent(self, event):
-        if event.button() == Qt.LeftButton and self.start_pos:
-            self.current_pos = event.pos()
-            self.selection_rect = QRect(self.start_pos, self.current_pos).normalized()
-            self.update()
-            self.start_pos = None
-            
-            # Convert label coords to original image pixels
-            if self.selection_rect.isValid() and self.base_pixmap and not self.base_pixmap.isNull():
-                lbl_w, lbl_h = self.width(), self.height()
-                pix_w, pix_h = self.base_pixmap.width(), self.base_pixmap.height()
-                
-                scale = min(lbl_w / pix_w, lbl_h / pix_h)
-                fit_w = int(pix_w * scale)
-                fit_h = int(pix_h * scale)
-                
-                x_offset = (lbl_w - fit_w) // 2
-                y_offset = (lbl_h - fit_h) // 2
-                
-                rx = self.selection_rect.x() - x_offset
-                ry = self.selection_rect.y() - y_offset
-                rw = self.selection_rect.width()
-                rh = self.selection_rect.height()
-                
-                orig_x = int(rx / scale)
-                orig_y = int(ry / scale)
-                orig_w = int(rw / scale)
-                orig_h = int(rh / scale)
-                
-        return self._img_dims
-
-    def _show_info_badge(self):
-        """Create (if needed) and fade-in the info badge over the thumbnail."""
-        # Skip if there's an active processing spinner
-        if self._spinner and self._spinner.isVisible():
-            return
-
-        w_px, h_px = self._read_dims()
-        if w_px == 0 and h_px == 0:
-            return   # can't load image — don't show badge
-
-        if self._info_badge is None:
-            badge_h = 42
-            badge_w = self.img_label.width()
-            self._info_badge = CardInfoBadge(
-                self.img_label, w_px, h_px, self._size_kb
-            )
-            self._info_badge.setGeometry(
-                0,
-                self.img_label.height() - badge_h,
-                badge_w,
-                badge_h
-            )
-
-        self._info_badge.fade_in()
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self.drag_start_position = event.pos()
-        super().mousePressEvent(event)
-        
-    def mouseReleaseEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            # Check drag distance threshold to distinguish click from drag
-            if (event.pos() - self.drag_start_position).manhattanLength() < QApplication.startDragDistance():
-                if self.parent_window_has_selections():
-                    self.checkbox.setChecked(not self.checkbox.isChecked())
-                else:
-                    self.clicked.emit(self.file_path)
-        super().mouseReleaseEvent(event)
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space):
+            if self.parent_window_has_selections():
+                self.checkbox.setChecked(not self.checkbox.isChecked())
+            else:
+                self.clicked.emit(self.file_path)
+            event.accept()
+        else:
+            super().keyPressEvent(event)
         
     def mouseMoveEvent(self, event):
         if not (event.buttons() & Qt.LeftButton):
@@ -1284,8 +1072,6 @@ class RegionSelectLabel(QLabel):
 
 
 # Interactive Region Selection label for Denoise/Deblur
-from PySide6.QtGui import QPen, QColor, QBrush
-from PySide6.QtCore import QRect
 
 class RegionSelectLabel(QLabel):
     region_selected = Signal(QRect) # Emits the raw pixel QRect of the original image
@@ -1299,13 +1085,19 @@ class RegionSelectLabel(QLabel):
         self.selection_rect = None # QRect in label coordinates
         self.base_pixmap = None
         self.zoom_factor = 1.0
-        self.setFixedSize(400, 360)
+        
+        from PySide6.QtGui import QGuiApplication
+        screen = QGuiApplication.primaryScreen()
+        dpi_scale = (screen.logicalDotsPerInch() / 96.0) if screen else 1.0
+        self.base_width = int(400 * dpi_scale)
+        self.base_height = int(360 * dpi_scale)
+        self.setFixedSize(self.base_width, self.base_height)
         
     def set_zoom(self, factor):
         self.zoom_factor = factor
         if self.base_pixmap and not self.base_pixmap.isNull():
-            w = int(400 * self.zoom_factor)
-            h = int(360 * self.zoom_factor)
+            w = int(self.base_width * self.zoom_factor)
+            h = int(self.base_height * self.zoom_factor)
             self.setFixedSize(w, h)
             self.update()
             
@@ -1313,8 +1105,8 @@ class RegionSelectLabel(QLabel):
         self.base_pixmap = pixmap
         self.selection_rect = None
         if self.base_pixmap and not self.base_pixmap.isNull():
-            w = int(400 * self.zoom_factor)
-            h = int(360 * self.zoom_factor)
+            w = int(self.base_width * self.zoom_factor)
+            h = int(self.base_height * self.zoom_factor)
             self.setFixedSize(w, h)
         self.update()
         
@@ -1332,9 +1124,14 @@ class RegionSelectLabel(QLabel):
         
         # Draw selection rectangle if exists
         if self.selection_rect and self.selection_rect.isValid():
-            pen = QPen(QColor(99, 102, 241), 2, Qt.DashLine)
+            from src.dialogs import _tc
+            accent_color = QColor(_tc()["accent"])
+            accent_brush_color = QColor(accent_color)
+            accent_brush_color.setAlpha(40)
+            
+            pen = QPen(accent_color, 2, Qt.DashLine)
             painter.setPen(pen)
-            painter.setBrush(QBrush(QColor(99, 102, 241, 40)))
+            painter.setBrush(QBrush(accent_brush_color))
             painter.drawRect(self.selection_rect)
         painter.end()
             
@@ -1396,6 +1193,25 @@ class ZoomPanImagePreview(QFrame):
         self.zoom_factor = 1.0
         self.is_region_select = is_region_select
         
+        # Create subtle dark/light-mode checkerboard pattern brush
+        from src.dialogs import _tc
+        is_light = _tc().get("is_light", False)
+        if is_light:
+            c1 = QColor(245, 245, 245)
+            c2 = QColor(230, 230, 230)
+        else:
+            c1 = QColor(30, 30, 36)
+            c2 = QColor(42, 42, 50)
+            
+        size = 10
+        pixmap = QPixmap(size * 2, size * 2)
+        pixmap.fill(c1)
+        painter = QPainter(pixmap)
+        painter.fillRect(0, 0, size, size, c2)
+        painter.fillRect(size, size, size, size, c2)
+        painter.end()
+        self.checkerboard_brush = QBrush(pixmap)
+        
         self.setMinimumSize(250, 250)
         self.setMouseTracking(True)
         
@@ -1418,6 +1234,12 @@ class ZoomPanImagePreview(QFrame):
         self.img_label.installEventFilter(self)
         self.installEventFilter(self)
         
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), self.checkerboard_brush)
+        painter.end()
+        
     def center_image(self, animate=False):
         target_x = (self.width() - self.img_label.width()) // 2
         target_y = (self.height() - self.img_label.height()) // 2
@@ -1435,9 +1257,7 @@ class ZoomPanImagePreview(QFrame):
             
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        if not hasattr(self, '_first_resize'):
-            self._first_resize = True
-            self.center_image()
+        self.center_image()
 
     def eventFilter(self, obj, event):
         if obj == self.img_label or obj == self:

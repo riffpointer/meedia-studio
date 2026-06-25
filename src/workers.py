@@ -722,3 +722,22 @@ class MetadataStripWorker(QThread):
             
         except Exception as e:
             self.finished.emit(False, "", str(e))
+
+
+class CatalogLoader(QThread):
+    loaded = Signal(list, bool)
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        
+    def run(self):
+        try:
+            import requests
+            url = "https://gwfh.mranftl.com/api/fonts"
+            response = requests.get(url, timeout=12)
+            if response.status_code == 200:
+                self.loaded.emit(response.json(), True)
+            else:
+                self.loaded.emit([], False)
+        except Exception:
+            self.loaded.emit([], False)

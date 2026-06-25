@@ -34,7 +34,12 @@ def get_accent_colors():
     c = QColor(tc["accent"])
     return tc["accent"], c.darker(110).name(), c.darker(120).name()
 
-from src.utils import pil_to_qimage
+def _sync_scroll(value, target_bar):
+    target_bar.blockSignals(True)
+    target_bar.setValue(value)
+    target_bar.blockSignals(False)
+
+from src.utils import pil_to_qimage, load_qss_template
 from src.widgets import TransparentImageLabel, TransparentSvgLabel, RegionSelectLabel, ZoomPanImagePreview
 
 
@@ -76,7 +81,7 @@ class DetailedErrorDialog(QDialog):
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
         self.btn_close = QPushButton("Close", self)
-        self.btn_close.setObjectName("cancelButton")
+        self.btn_close.setObjectName("closeButton")
         self.btn_close.clicked.connect(self.reject)
         btn_layout.addWidget(self.btn_close)
         layout.addLayout(btn_layout)
@@ -187,7 +192,7 @@ class FileDownloadProgressDialog(QDialog):
 class ConfirmDialog(QDialog):
     def __init__(self, file_path, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Remove Background?")
+        self.setWindowTitle("Remove Background")
         self.setMinimumSize(450, 520)
         self.setModal(True)
         
@@ -253,6 +258,7 @@ class ConfirmDialog(QDialog):
         self.btn_no.setObjectName("cancelButton")
         self.btn_yes = QPushButton("Remove Background", self)
         
+        btn_layout.addStretch()
         btn_layout.addWidget(self.btn_no)
         btn_layout.addWidget(self.btn_yes)
         layout.addLayout(btn_layout)
@@ -261,9 +267,9 @@ class ConfirmDialog(QDialog):
         self.btn_no.clicked.connect(self.reject)
         
         self.setStyleSheet(
-            "QComboBox {{ background-color: {input_bg}; border: 1px solid {scrollbar_handle};"
+            "QComboBox {{ background-color: {input_bg}; border: 1px solid {border};"
             " border-radius: 4px; padding: 6px 12px; color: {text}; }}"
-            " QComboBox::drop-down {{ border: none; }}".format(**_tc())
+            " QComboBox::drop-down {{ border: none; width: 20px; }} QComboBox::down-arrow {{ image: url(res/icons/bootstrap-png/chevron-down.png); width: 12px; height: 12px; }}".format(**_tc())
         )
         
     def get_settings(self):
@@ -319,8 +325,7 @@ class BatchConfirmDialog(QDialog):
                 break
         self.model_combo.setCurrentText(default_item)
         form_layout.addWidget(self.model_combo, 0, 1)
-        layout.addWidget(form)
-        layout.addStretch()
+        layout.addWidget(form, 1)
         
         # Action buttons
         btn_layout = QHBoxLayout()
@@ -328,6 +333,7 @@ class BatchConfirmDialog(QDialog):
         self.btn_no.setObjectName("cancelButton")
         self.btn_yes = QPushButton("Start Batch Removal", self)
         
+        btn_layout.addStretch()
         btn_layout.addWidget(self.btn_no)
         btn_layout.addWidget(self.btn_yes)
         layout.addLayout(btn_layout)
@@ -336,9 +342,9 @@ class BatchConfirmDialog(QDialog):
         self.btn_no.clicked.connect(self.reject)
         
         self.setStyleSheet(
-            "QComboBox {{ background-color: {input_bg}; border: 1px solid {scrollbar_handle};"
+            "QComboBox {{ background-color: {input_bg}; border: 1px solid {border};"
             " border-radius: 4px; padding: 6px 12px; color: {text}; }}"
-            " QComboBox::drop-down {{ border: none; }}".format(**_tc())
+            " QComboBox::drop-down {{ border: none; width: 20px; }} QComboBox::down-arrow {{ image: url(res/icons/bootstrap-png/chevron-down.png); width: 12px; height: 12px; }}".format(**_tc())
         )
         
     def get_settings(self):
@@ -395,6 +401,7 @@ class UpscaleConfirmDialog(QDialog):
         self.btn_no.setObjectName("cancelButton")
         self.btn_yes = QPushButton("Upscale Image", self)
         
+        btn_layout.addStretch()
         btn_layout.addWidget(self.btn_no)
         btn_layout.addWidget(self.btn_yes)
         layout.addLayout(btn_layout)
@@ -403,9 +410,9 @@ class UpscaleConfirmDialog(QDialog):
         self.btn_no.clicked.connect(self.reject)
         
         self.setStyleSheet(
-            "QComboBox {{ background-color: {input_bg}; border: 1px solid {scrollbar_handle};"
+            "QComboBox {{ background-color: {input_bg}; border: 1px solid {border};"
             " border-radius: 4px; padding: 6px 12px; color: {text}; }}"
-            " QComboBox::drop-down {{ border: none; }}".format(**_tc())
+            " QComboBox::drop-down {{ border: none; width: 20px; }} QComboBox::down-arrow {{ image: url(res/icons/bootstrap-png/chevron-down.png); width: 12px; height: 12px; }}".format(**_tc())
         )
         
     def get_settings(self):
@@ -471,9 +478,9 @@ class BatchUpscaleConfirmDialog(QDialog):
         self.btn_no.clicked.connect(self.reject)
         
         self.setStyleSheet(
-            "QComboBox {{ background-color: {input_bg}; border: 1px solid {scrollbar_handle};"
+            "QComboBox {{ background-color: {input_bg}; border: 1px solid {border};"
             " border-radius: 4px; padding: 6px 12px; color: {text}; }}"
-            " QComboBox::drop-down {{ border: none; }}".format(**_tc())
+            " QComboBox::drop-down {{ border: none; width: 20px; }} QComboBox::down-arrow {{ image: url(res/icons/bootstrap-png/chevron-down.png); width: 12px; height: 12px; }}".format(**_tc())
         )
         
     def get_settings(self):
@@ -560,6 +567,7 @@ class VectorConfirmDialog(QDialog):
         self.btn_no.setObjectName("cancelButton")
         self.btn_yes = QPushButton("Vectorize Image", self)
         
+        btn_layout.addStretch()
         btn_layout.addWidget(self.btn_no)
         btn_layout.addWidget(self.btn_yes)
         layout.addLayout(btn_layout)
@@ -573,9 +581,9 @@ class VectorConfirmDialog(QDialog):
         self.toggle_mode_options()
         
         self.setStyleSheet(
-            "QComboBox {{ background-color: {input_bg}; border: 1px solid {scrollbar_handle};"
+            "QComboBox {{ background-color: {input_bg}; border: 1px solid {border};"
             " border-radius: 4px; padding: 6px 12px; color: {text}; }}"
-            " QComboBox::drop-down {{ border: none; }}".format(**_tc())
+            " QComboBox::drop-down {{ border: none; width: 20px; }} QComboBox::down-arrow {{ image: url(res/icons/bootstrap-png/chevron-down.png); width: 12px; height: 12px; }}".format(**_tc())
         )
         
     def choose_mono_color(self):
@@ -693,10 +701,10 @@ class VectorComparisonDialog(QDialog):
         self.orig_img.set_image(QPixmap(file_path))
         self.res_svg.set_svg_data(svg_content)
         
-        self.orig_scroll.verticalScrollBar().valueChanged.connect(self.res_scroll.verticalScrollBar().setValue)
-        self.res_scroll.verticalScrollBar().valueChanged.connect(self.orig_scroll.verticalScrollBar().setValue)
-        self.orig_scroll.horizontalScrollBar().valueChanged.connect(self.res_scroll.horizontalScrollBar().setValue)
-        self.res_scroll.horizontalScrollBar().valueChanged.connect(self.orig_scroll.horizontalScrollBar().setValue)
+        self.orig_scroll.verticalScrollBar().valueChanged.connect(lambda v: _sync_scroll(v, self.res_scroll.verticalScrollBar()))
+        self.res_scroll.verticalScrollBar().valueChanged.connect(lambda v: _sync_scroll(v, self.orig_scroll.verticalScrollBar()))
+        self.orig_scroll.horizontalScrollBar().valueChanged.connect(lambda v: _sync_scroll(v, self.res_scroll.horizontalScrollBar()))
+        self.res_scroll.horizontalScrollBar().valueChanged.connect(lambda v: _sync_scroll(v, self.orig_scroll.horizontalScrollBar()))
         
         self.orig_img.installEventFilter(self)
         self.res_svg.installEventFilter(self)
@@ -707,8 +715,8 @@ class VectorComparisonDialog(QDialog):
         
         self.btn_save = QPushButton("Save Vector (SVG)", self)
         self.btn_save.setStyleSheet("""
-            QPushButton {{ background-color: #6366f1; }}
-            QPushButton:hover {{ background-color: #4f46e5; }}
+            QPushButton {{ background-color: {accent}; }}
+            QPushButton:hover {{ background-color: {accent_hover}; }}
         """.format(**_tc()))
         
         btn_layout.addWidget(self.btn_discard)
@@ -837,9 +845,9 @@ class BatchVectorConfirmDialog(QDialog):
         self.toggle_mode_options()
         
         self.setStyleSheet(
-            "QComboBox {{ background-color: {input_bg}; border: 1px solid {scrollbar_handle};"
+            "QComboBox {{ background-color: {input_bg}; border: 1px solid {border};"
             " border-radius: 4px; padding: 6px 12px; color: {text}; }}"
-            " QComboBox::drop-down {{ border: none; }}".format(**_tc())
+            " QComboBox::drop-down {{ border: none; width: 20px; }} QComboBox::down-arrow {{ image: url(res/icons/bootstrap-png/chevron-down.png); width: 12px; height: 12px; }}".format(**_tc())
         )
         
     def choose_mono_color(self):
@@ -885,7 +893,7 @@ class LoadingDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Processing")
-        self.setMinimumSize(420, 200)
+        self.setMinimumSize(420, 260)
         self.setModal(True)
         self.setWindowFlags(self.windowFlags() | Qt.CustomizeWindowHint)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowCloseButtonHint)
@@ -910,6 +918,12 @@ class LoadingDialog(QDialog):
         self.pbar.setMaximum(0)  # Indeterminate initially
         layout.addWidget(self.pbar)
         
+        self.notice_label = QLabel("Note: This operation cannot be cancelled once started.", self)
+        self.notice_label.setWordWrap(True)
+        self.notice_label.setAlignment(Qt.AlignCenter)
+        self.notice_label.setStyleSheet("color: {text_muted}; font-size: 11px; font-style: italic;".format(**_tc()))
+        layout.addWidget(self.notice_label)
+        
         # Timer variables for inference mode
         self.is_downloading = False
         self.start_time = time.time()
@@ -932,18 +946,22 @@ class LoadingDialog(QDialog):
         self.pbar.setMaximum(0)  # Marquee busy state
         
     def update_timer(self):
-        if not self.is_downloading:
-            elapsed = time.time() - self.start_time
-            if self.parent().active_tool == 'bg_remover':
-                model_name = self.parent().settings.get("model_name", "u2net")
-                self.info.setText(f"Applying AI segmentation... {elapsed:.1f}s\nModel: {model_name}")
-            elif self.parent().active_tool == 'upscaler':
-                model_name = self.parent().upscale_model
-                scale = self.parent().upscale_scale
-                self.info.setText(f"Applying Super Resolution... {elapsed:.1f}s\nModel: {model_name.upper()} ({scale}x)")
-            elif self.parent().active_tool == 'vectorizer':
-                mode = self.parent().vectorizer_mode
-                self.info.setText(f"Tracing vector paths... {elapsed:.1f}s\nMode: {mode.capitalize()}")
+        if self.is_downloading:
+            return
+        parent = self.parent()
+        if not parent or not hasattr(parent, 'active_tool'):
+            return
+        elapsed = time.time() - self.start_time
+        if parent.active_tool == 'bg_remover':
+            model_name = parent.settings.get("model_name", "u2net")
+            self.info.setText(f"Applying AI segmentation... {elapsed:.1f}s\nModel: {model_name}")
+        elif parent.active_tool == 'upscaler':
+            model_name = parent.upscale_model
+            scale = parent.upscale_scale
+            self.info.setText(f"Applying Super Resolution... {elapsed:.1f}s\nModel: {model_name.upper()} ({scale}x)")
+        elif parent.active_tool == 'vectorizer':
+            mode = parent.vectorizer_mode
+            self.info.setText(f"Tracing vector paths... {elapsed:.1f}s\nMode: {mode.capitalize()}")
         
     def closeEvent(self, event):
         self.timer.stop()
@@ -1039,10 +1057,10 @@ class ComparisonDialog(QDialog):
         self.res_img.set_image(self.pixmap)
         
         # Synchronize scrollbars
-        self.orig_scroll.verticalScrollBar().valueChanged.connect(self.res_scroll.verticalScrollBar().setValue)
-        self.res_scroll.verticalScrollBar().valueChanged.connect(self.orig_scroll.verticalScrollBar().setValue)
-        self.orig_scroll.horizontalScrollBar().valueChanged.connect(self.res_scroll.horizontalScrollBar().setValue)
-        self.res_scroll.horizontalScrollBar().valueChanged.connect(self.orig_scroll.horizontalScrollBar().setValue)
+        self.orig_scroll.verticalScrollBar().valueChanged.connect(lambda v: _sync_scroll(v, self.res_scroll.verticalScrollBar()))
+        self.res_scroll.verticalScrollBar().valueChanged.connect(lambda v: _sync_scroll(v, self.orig_scroll.verticalScrollBar()))
+        self.orig_scroll.horizontalScrollBar().valueChanged.connect(lambda v: _sync_scroll(v, self.res_scroll.horizontalScrollBar()))
+        self.res_scroll.horizontalScrollBar().valueChanged.connect(lambda v: _sync_scroll(v, self.orig_scroll.horizontalScrollBar()))
         
         # Install Event Filters
         self.orig_img.installEventFilter(self)
@@ -1075,8 +1093,8 @@ class ComparisonDialog(QDialog):
         
         self.btn_replace = QPushButton("Replace Original File", self)
         self.btn_replace.setStyleSheet("""
-            QPushButton {{ background-color: #6366f1; }}
-            QPushButton:hover {{ background-color: #4f46e5; }}
+            QPushButton {{ background-color: {accent}; }}
+            QPushButton:hover {{ background-color: {accent_hover}; }}
         """.format(**_tc()))
         
         btn_layout.addWidget(self.btn_discard)
@@ -1203,10 +1221,10 @@ class BatchComparisonDialog(QDialog):
         layout.addLayout(comp_layout, 1)
         
         # Link scrollbars
-        self.orig_scroll.verticalScrollBar().valueChanged.connect(self.res_scroll.verticalScrollBar().setValue)
-        self.res_scroll.verticalScrollBar().valueChanged.connect(self.orig_scroll.verticalScrollBar().setValue)
-        self.orig_scroll.horizontalScrollBar().valueChanged.connect(self.res_scroll.horizontalScrollBar().setValue)
-        self.res_scroll.horizontalScrollBar().valueChanged.connect(self.orig_scroll.horizontalScrollBar().setValue)
+        self.orig_scroll.verticalScrollBar().valueChanged.connect(lambda v: _sync_scroll(v, self.res_scroll.verticalScrollBar()))
+        self.res_scroll.verticalScrollBar().valueChanged.connect(lambda v: _sync_scroll(v, self.orig_scroll.verticalScrollBar()))
+        self.orig_scroll.horizontalScrollBar().valueChanged.connect(lambda v: _sync_scroll(v, self.res_scroll.horizontalScrollBar()))
+        self.res_scroll.horizontalScrollBar().valueChanged.connect(lambda v: _sync_scroll(v, self.orig_scroll.horizontalScrollBar()))
         
         # Install Event Filters
         self.orig_img.installEventFilter(self)
@@ -1230,22 +1248,22 @@ class BatchComparisonDialog(QDialog):
         
         self.btn_replace = QPushButton("Replace Original", self)
         self.btn_replace.setStyleSheet("""
-            QPushButton {{ background-color: #6366f1; }}
-            QPushButton:hover {{ background-color: #4f46e5; }}
+            QPushButton {{ background-color: {accent}; }}
+            QPushButton:hover {{ background-color: {accent_hover}; }}
         """.format(**_tc()))
         
         self.btn_apply_all_new = QPushButton("Apply to All (Save New)", self)
         self.btn_apply_all_new.setStyleSheet("background-color: {success_deep};".format(**_tc()))
         
         self.btn_apply_all_replace = QPushButton("Apply to All (Replace)", self)
-        self.btn_apply_all_replace.setStyleSheet("background-color: #4338ca;")
+        self.btn_apply_all_replace.setStyleSheet("background-color: {accent};".format(**_tc()))
         
+        btn_layout.addWidget(self.btn_apply_all_new)
+        btn_layout.addWidget(self.btn_apply_all_replace)
+        btn_layout.addStretch()
         btn_layout.addWidget(self.btn_discard)
         btn_layout.addWidget(self.btn_new)
         btn_layout.addWidget(self.btn_replace)
-        btn_layout.addStretch()
-        btn_layout.addWidget(self.btn_apply_all_new)
-        btn_layout.addWidget(self.btn_apply_all_replace)
         
         layout.addLayout(btn_layout)
         
@@ -1458,7 +1476,7 @@ class SettingsDialog(QDialog):
         
         self.font_delete_check = QCheckBox("Delete files after zipping", fonts_form)
         self.font_delete_check.setChecked(self.settings.get("font_delete_after_zip", True))
-        self.font_delete_check.setStyleSheet("margin-left: 20px;")
+        self.font_delete_check.setStyleSheet("margin-left: 16px;")
         self.font_delete_check.setEnabled(self.font_zip_check.isChecked())
         self.font_zip_check.toggled.connect(self.font_delete_check.setEnabled)
         fonts_grid.addWidget(self.font_delete_check, 4, 1)
@@ -1581,8 +1599,7 @@ class SettingsDialog(QDialog):
         # Connect signals
         self.btn_tool_manager.clicked.connect(self.on_open_tool_manager)
         
-        layout.addWidget(self.tab_widget)
-        layout.addStretch()
+        layout.addWidget(self.tab_widget, 1)
         
         # Actions
         btn_layout = QHBoxLayout()
@@ -1590,6 +1607,7 @@ class SettingsDialog(QDialog):
         self.btn_cancel.setObjectName("cancelButton")
         self.btn_save = QPushButton("Save Settings", self)
         
+        btn_layout.addStretch()
         btn_layout.addWidget(self.btn_cancel)
         btn_layout.addWidget(self.btn_save)
         layout.addLayout(btn_layout)
@@ -1613,6 +1631,8 @@ class SettingsDialog(QDialog):
                 border-bottom: none;
                 border-top-left-radius: 4px;
                 border-top-right-radius: 4px;
+                border-bottom-left-radius: 0px;
+                border-bottom-right-radius: 0px;
                 padding: 8px 16px;
                 font-weight: bold;
                 font-size: 12px;
@@ -1627,16 +1647,6 @@ class SettingsDialog(QDialog):
                 color: {text_bright};
                 border-color: {secondary_btn_border};
             }}
-            QComboBox {{
-                background-color: {input_bg};
-                border: 1px solid {scrollbar_handle};
-                border-radius: 4px;
-                padding: 6px 12px;
-                color: {text};
-            }}
-            QComboBox::drop-down {{
-                border: none;
-            }}
             QCheckBox {{
                 color: {text};
             }}
@@ -1644,7 +1654,15 @@ class SettingsDialog(QDialog):
                 width: 18px;
                 height: 18px;
             }}
-        """.format(**_tc()))
+        """.format(**_tc())
+        + load_qss_template(
+            "combobox_styles.qss",
+            accent=_tc()['accent'],
+            text=_tc()['text'],
+            border=_tc()['border'],
+            input_bg=_tc()['input_bg'],
+            text_hex=_tc()['text'].lstrip('#')
+        ))
         
     def on_browse_folder(self):
         folder = QFileDialog.getExistingDirectory(self, "Select Gallery Folder", self.folder_edit.text() or os.getcwd())
@@ -1882,12 +1900,13 @@ class RestorationConfirmDialog(QDialog):
         self.setStyleSheet("""
             QComboBox {{
                 background-color: {input_bg};
-                border: 1px solid {scrollbar_handle};
+                border: 1px solid {border};
                 border-radius: 4px;
                 padding: 6px 12px;
                 color: {text};
             }}
-            QComboBox::drop-down {{ border: none; }}
+            QComboBox::drop-down {{ border: none; width: 20px; }}
+            QComboBox::down-arrow {{ image: url(res/icons/bootstrap-png/chevron-down.png); width: 12px; height: 12px; }}
             QSlider::groove:horizontal {{
                 border: 1px solid {border_subtle};
                 height: 6px;
@@ -2080,12 +2099,13 @@ class BatchRestorationConfirmDialog(QDialog):
         self.setStyleSheet("""
             QComboBox {{
                 background-color: {input_bg};
-                border: 1px solid {scrollbar_handle};
+                border: 1px solid {border};
                 border-radius: 4px;
                 padding: 6px 12px;
                 color: {text};
             }}
-            QComboBox::drop-down {{ border: none; }}
+            QComboBox::drop-down {{ border: none; width: 20px; }}
+            QComboBox::down-arrow {{ image: url(res/icons/bootstrap-png/chevron-down.png); width: 12px; height: 12px; }}
             QSlider::groove:horizontal {{
                 border: 1px solid {border_subtle};
                 height: 6px;
@@ -2208,9 +2228,9 @@ class VideoConvertConfirmDialog(QDialog):
         self.btn_no.clicked.connect(self.reject)
         
         self.setStyleSheet(
-            "QComboBox {{ background-color: {input_bg}; border: 1px solid {scrollbar_handle};"
+            "QComboBox {{ background-color: {input_bg}; border: 1px solid {border};"
             " border-radius: 4px; padding: 6px 12px; color: {text}; }}"
-            " QComboBox::drop-down {{ border: none; }}".format(**_tc())
+            " QComboBox::drop-down {{ border: none; width: 20px; }} QComboBox::down-arrow {{ image: url(res/icons/bootstrap-png/chevron-down.png); width: 12px; height: 12px; }}".format(**_tc())
         )
         
         self.format_combo.currentTextChanged.connect(self.on_format_changed)
@@ -2296,9 +2316,9 @@ class BatchVideoConvertConfirmDialog(QDialog):
         self.btn_no.clicked.connect(self.reject)
         
         self.setStyleSheet(
-            "QComboBox {{ background-color: {input_bg}; border: 1px solid {scrollbar_handle};"
+            "QComboBox {{ background-color: {input_bg}; border: 1px solid {border};"
             " border-radius: 4px; padding: 6px 12px; color: {text}; }}"
-            " QComboBox::drop-down {{ border: none; }}".format(**_tc())
+            " QComboBox::drop-down {{ border: none; width: 20px; }} QComboBox::down-arrow {{ image: url(res/icons/bootstrap-png/chevron-down.png); width: 12px; height: 12px; }}".format(**_tc())
         )
         
         self.format_combo.currentTextChanged.connect(self.on_format_changed)
@@ -2372,9 +2392,9 @@ class SmartCropConfirmDialog(QDialog):
         self.btn_no.clicked.connect(self.reject)
         
         self.setStyleSheet(
-            "QComboBox {{ background-color: {input_bg}; border: 1px solid {scrollbar_handle};"
+            "QComboBox {{ background-color: {input_bg}; border: 1px solid {border};"
             " border-radius: 4px; padding: 6px 12px; color: {text}; }}"
-            " QComboBox::drop-down {{ border: none; }}".format(**_tc())
+            " QComboBox::drop-down {{ border: none; width: 20px; }} QComboBox::down-arrow {{ image: url(res/icons/bootstrap-png/chevron-down.png); width: 12px; height: 12px; }}".format(**_tc())
         )
         
     def get_settings(self):
@@ -2421,9 +2441,9 @@ class BatchSmartCropConfirmDialog(QDialog):
         self.btn_no.clicked.connect(self.reject)
         
         self.setStyleSheet(
-            "QComboBox {{ background-color: {input_bg}; border: 1px solid {scrollbar_handle};"
+            "QComboBox {{ background-color: {input_bg}; border: 1px solid {border};"
             " border-radius: 4px; padding: 6px 12px; color: {text}; }}"
-            " QComboBox::drop-down {{ border: none; }}".format(**_tc())
+            " QComboBox::drop-down {{ border: none; width: 20px; }} QComboBox::down-arrow {{ image: url(res/icons/bootstrap-png/chevron-down.png); width: 12px; height: 12px; }}".format(**_tc())
         )
         
     def get_settings(self):
